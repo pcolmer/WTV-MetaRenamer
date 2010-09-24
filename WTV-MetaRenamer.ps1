@@ -8,6 +8,7 @@
 #
 # Version history:
 # 0.00     Initial version
+# 0.01     Changed name of config XML file and tweaked text output.
 #
 # Original author: Philip Colmer
 
@@ -212,6 +213,7 @@ function MatchEpisode($text)
          else
          {
             # An episode number of 0 isn't valid
+            Write-Verbose "... matched but invalid episode number"
             Write-Output ([int]0)
             Write-Output ([int]0)
          }
@@ -220,7 +222,11 @@ function MatchEpisode($text)
       {
          Write-Host "... matched $count times - unable to safely rename"
          foreach ($ep in $match)
-            { Write-Host "... S$($ep.SeasonNumber)E$($ep.EpisodeNumber) - $($ep.EpisodeName)" }
+         {
+            $s = $([int]$ep.SeasonNumber).ToString("0#")
+            $e = $([int]$ep.EpisodeNumber).ToString("0#")
+            Write-Host "... S$($s)E$($e) - $($ep.EpisodeName)"
+         }
          Write-Output ([int]-1)
          Write-Output ([int]-1)
       }
@@ -228,6 +234,7 @@ function MatchEpisode($text)
    else
    {
       # Not matched - return zeroes
+      Write-Verbose "... didn't match text"
       Write-Output ([int]0)
       Write-Output ([int]0)
    }
@@ -356,7 +363,7 @@ function FetchSeriesID($series_name)
    }
    else
    {
-      Write-Host "... failed to retrieve series information from TvDB"
+      Write-Verbose "... failed to retrieve series information from TvDB"
       return $null
    }
 }
@@ -368,7 +375,7 @@ $recordings = $null
 
 $my_config = New-Object XML
 try {
-    $my_config.Load("$i_am_here\Outline.xml")
+    $my_config.Load("$i_am_here\WTV-MetaRenamer.xml")
     $data_loc = $my_config.config.xml_cache
     $recordings = $my_config.config.recordings
 }
@@ -385,9 +392,10 @@ finally {
 
 # Undo log filename
 $undo_log = "$recordings\UndoRenames_$($(Get-Date).ToString("yyyyMMddHHmmss")).ps1"
+Write-Host "Undo log is called '$undo_log'"
    
 # Get a randomly selected mirror for TvDB XML files
-$apikey = "0629B785CE550C8D"
+$apikey = "DE8C5EB3A19C799A"
 $tvdb_mirror = AllocateDBMirror
 
 # See if we've been run before (i.e. we preserved the TvDB server time)
@@ -467,6 +475,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
         $subtitle = $($folder.GetDetailsOf($file, 195))
         if ($subtitle -ne "")
         {
+           Write-Verbose "... testing against the subtitle metadata"
            $result = MatchEpisode $subtitle
            $this_season = $result[0]
            $this_episode = $result[1]
@@ -484,6 +493,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
             $try_this = $folder.GetDetailsOf($file, 258)
             $try_this = $try_this.split(":")[0]
 
+            Write-Verbose "... testing against the description and colon delimiter"
             $result = MatchEpisode $try_this
             $this_season = $result[0]
             $this_episode = $result[1]
@@ -503,6 +513,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
             $try_this = $this_title.substring($colon+1)
             $try_this = $try_this.TrimStart()
 
+            Write-Verbose "... testing against title string combo of series and episode"
             $result = MatchEpisode $try_this
             $this_season = $result[0]
             $this_episode = $result[1]
@@ -519,6 +530,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
             $try_this = $folder.GetDetailsOf($file, 258)
             $try_this = $try_this.split(".")[0]
 
+            Write-Verbose "... testing against the description and full-stop delimiter"
             $result = MatchEpisode $try_this
             $this_season = $result[0]
             $this_episode = $result[1]
@@ -563,6 +575,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
                         $try_this = $try_this.Substring(0, $split_at)
                     }
                     
+                    Write-Verbose "... testing against BBC format description field"
                     $result = MatchEpisode $try_this
                     $this_season = $result[0]
                     $this_episode = $result[1]
@@ -606,7 +619,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
          }
          else
          {
-            Write-Host "... failed to match against the database"
+            Write-Host "... failed to match TV programme precisely against the database"
             # If $this_episode is -1, we matched multiple times so only list
             # best matches if we truly didn't match anything.
             if ($this_episode -eq 0)
@@ -617,11 +630,16 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
                     if ([int]$($episode.GetAttribute("ID")) -lt $lowest_score)
                         { $lowest_score = [int]$($episode.GetAttribute("ID")) }
                 }
-                Write-Host "... best matches have a score of $lowest_score"
+                Write-Verbose "... best matches have a score of $lowest_score"
+                Write-Host "... possible matching programmes are:"
                 foreach ($episode in $episodes.Data.Episode)
                 {
                     if ($($episode.GetAttribute("ID")) -eq $lowest_score)
-                        { Write-Host "... S$($episode.SeasonNumber)E$($episode.EpisodeNumber) - $($episode.EpisodeName)" }
+                    {
+                        $s = $([int]$episode.SeasonNumber).ToString("0#")
+                        $e = $([int]$episode.EpisodeNumber).ToString("0#")
+                        Write-Host "... S$($s)E$($e) - $($episode.EpisodeName)"
+                    }
                 }
             }
          }
