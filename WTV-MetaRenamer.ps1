@@ -9,9 +9,15 @@
 # Version history:
 # 0.00     Initial version
 # 0.01     Changed name of config XML file and tweaked text output.
+# 0.02     Fixed issue #284 - BestMatchEpisode will pick empty episode names
+#          Fixed issue #282 - Proposed improvement to series name matching
+#          Fixed issue #285 - Add option to pick single matches
+#          Fixed issue #283 - Add interactive mode
+#          Fixed issue #337 - BME doesn't work if no valid episode name text can be found
 #
 # Original author: Philip Colmer
 
+param([string]$configurationfile, [switch]$interactive)
 
 $VerbosePreference = "SilentlyContinue"
 Set-StrictMode –version Latest
@@ -163,7 +169,17 @@ function BestMatchEpisode($text)
    # the edit distance and use that as an "accuracy" score. After we've performed all
    # of the tests, we'll check the overall accuracy scores to see if there is one we are
    # happy with.
-   Write-Verbose "... BestMatchEpisode called for '$text'"
+   #
+   # Note that if $interactive is true, we output $text to Host rather than Verbose so that if we don't get a match,
+   # the user has some context to help them pick matches against
+   if ($interactive)
+   {
+       Write-Host "... BestMatchEpisode called for '$text'"
+   }
+   else
+   {
+       Write-Verbose "... BestMatchEpisode called for '$text'"
+   }
    
    # If the text we are being asked to test against is more than twice the length of
    # the longest episode name we have, this probably isn't valid text. For example, it
@@ -178,16 +194,40 @@ function BestMatchEpisode($text)
    foreach ($episode in $episodes.Data.Episode)
    {
       $score = Get-Ld $($episode.EpisodeName) $text -i
-      if ($score -lt $episode.GetAttribute("ID"))
+      if (($score -lt $episode.GetAttribute("ID")) -or (-1 -eq $episode.GetAttribute("ID")))
       {
          Write-Verbose "... replacing previous score of $($episode.GetAttribute("ID")) with score of $score for $($episode.EpisodeName)"
          $episode.SetAttribute("ID", $score)
       }
       else
       {
-         Write-Verbose "... $($episode.EpisodeName) has a score of $score but this is larger than the previous score of $($episode.GetAttribute("ID"))"
+         Write-Verbose "... '$($episode.EpisodeName)' has a score of $score but this is larger than the previous score of $($episode.GetAttribute("ID"))"
       }
    }
+}
+
+function GetInputFromUser($upper)
+{
+    # Get input from the user and validate it as either an empty string
+    # or a number in the range 1 to $upper.
+    # If an empty string, return -1.
+    $answer = 0
+    do
+    {
+        $val = Read-Host
+        if ($val -ne "")
+        {
+            $intval = 0
+            if ([int]::TryParse($val, [ref]$intval))
+            {
+                if ($intval -ge 1 -and $intval -le $upper)
+                    { $answer = $intval }
+            }
+        }
+        else
+            { $answer = -1 }
+    } while ( $answer -eq 0 )
+    return $answer
 }
 
 function MatchEpisode($text)
@@ -221,11 +261,45 @@ function MatchEpisode($text)
       else
       {
          Write-Host "... matched $count times - unable to safely rename"
+         $index = 1
          foreach ($ep in $match)
          {
             $s = $([int]$ep.SeasonNumber).ToString("0#")
             $e = $([int]$ep.EpisodeNumber).ToString("0#")
-            Write-Host "... S$($s)E$($e) - $($ep.EpisodeName)"
+            if ($interactive)
+            {
+                Write-Host "... [$index] S$($s)E$($e) - $($ep.EpisodeName)"
+            }
+            else
+            {
+                Write-Host "... S$($s)E$($e) - $($ep.EpisodeName)"
+            }
+            $index++
+         }
+         
+         # We end up with index being one too high ...
+         $index--
+         
+         if ($interactive)
+         {
+            Write-Host "... Enter a number from 1 to $index or RETURN to skip"
+            $answer = GetInputFromUser $index
+            if ($answer -ne -1)
+            {
+                # User provided an answer in the correct range so find it and return
+                # that to the function caller
+                $index = 1
+                foreach ($ep in $match)
+                {
+                    if ($index -eq $answer)
+                    {
+                        Write-Output ([int]$ep.SeasonNumber)
+                        Write-Output ([int]$ep.EpisodeNumber)
+                        return
+                    }
+                    $index++
+                }
+            }
          }
          Write-Output ([int]-1)
          Write-Output ([int]-1)
@@ -294,7 +368,7 @@ function FetchEpisodeInfo($series_id)
         }
     }
     
-    # Pre-set the edit distance scores to be the length of the episode names.
+    # Pre-set the edit distance scores to be -1.
     # The value is stored as an attribute of the ID node as an easy way to stash it.
     # Also track the length of the longest episode name so that we can try to be
     # smarter about when we use best match calculations if the test text is way too long.
@@ -302,7 +376,7 @@ function FetchEpisodeInfo($series_id)
     foreach ($episode in $episode_info.Data.Episode)
     {
         $this_ep_length = $($episode.EpisodeName).Length
-        $episode.SetAttribute("ID", $this_ep_length)
+        $episode.SetAttribute("ID", -1)
         if ($this_ep_length -gt $longest_episode_name)
             { $longest_episode_name = $this_ep_length }
     }
@@ -315,6 +389,13 @@ function FetchEpisodeInfo($series_id)
 
 function FetchSeriesID($series_name)
 {
+   # Make sure we have been given a series name!
+   if ($series_name -eq "")
+   {
+      Write-Host "... no series name provided"
+      return $null
+   }
+
    # Check to see if the series name has been entered into the cached series database
    $series_list = New-Object XML
    $series_list.Load("$data_loc\SeriesList.xml")
@@ -336,6 +417,31 @@ function FetchSeriesID($series_name)
    {
       $count = 0
       foreach ($this_series in $series_info.Data.Series) { $count++ }
+      
+      if ($count -gt 1)
+      {
+         # More than one match returned from TvDB - but does one of them match completely?
+         Write-Verbose "... TvDB has returned multiple matches"
+         
+         foreach ($this_series in $series_info.Data.Series)
+         {
+            if ($this_series.SeriesName -eq $series_name)
+            {
+               Write-Verbose "... got precise match"
+               # Add the series information automatically to the list file
+               $series_xml = @($series_list.Data.Series)[0]
+               $new_series_xml = $series_xml.Clone()
+               $new_series_xml.seriesid = $this_series.seriesid
+               $new_series_xml.SeriesName = $this_series.SeriesName
+               $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
+               $series_list.Save("$data_loc\SeriesList.xml")
+         
+               Write-Verbose "... returning $($this_series.seriesid)"
+               Write-Output $this_series.seriesid
+               return
+            }
+         }
+      }
    
       if ($count -eq 1)
       {
@@ -354,10 +460,57 @@ function FetchSeriesID($series_name)
       else
       {
          Write-Host "More than one series matches series name '$series_name':"
+         $index = 1
          foreach ($this_series in $series_info.Data.Series)
          {
-            Write-Host "ID:" $this_series.seriesid "; Name:" $this_series.SeriesName
+            if ($interactive)
+            {
+                Write-Host "... [$index] $($this_series.SeriesName)"
+            }
+            else
+            {
+                Write-Host "ID:" $this_series.seriesid "; Name:" $this_series.SeriesName
+            }
+            $index++
          }
+         
+         # We end up with index being one too high ...
+         $index--
+         
+         if ($interactive)
+         {
+            Write-Host "... Enter a number from 1 to $index or RETURN to skip"
+            $answer = GetInputFromUser $index
+            if ($answer -ne -1)
+            {
+                # User provided an answer in the correct range so find it and return
+                # that to the function caller
+                $index = 1
+                foreach ($this_series in $series_info.Data.Series)
+                {
+                    if ($index -eq $answer)
+                    {
+                        # Add the series information automatically to the list file
+                        # N.B. Because there were multiple matches for the series name
+                        # provided, and the user has made their choice, we are going to
+                        # record the pairing of the series name PROVIDED and the matching
+                        # series ID. We DON'T record the *actual* series name otherwise
+                        # it won't match next time either!
+                        $series_xml = @($series_list.Data.Series)[0]
+                        $new_series_xml = $series_xml.Clone()
+                        $new_series_xml.seriesid = $this_series.seriesid
+                        $new_series_xml.SeriesName = $series_name
+                        $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
+                        $series_list.Save("$data_loc\SeriesList.xml")
+
+                        Write-Output $this_series.seriesid
+                        return
+                    }
+                    $index++
+                }
+            }
+         }
+         
          return $null
       }
    }
@@ -368,16 +521,43 @@ function FetchSeriesID($series_name)
    }
 }
 
+function SafeBooleanConvert([string]$value)
+{
+   if (($value -eq '$true') -or ($value -eq "true") -or ($value -eq "1") -or ($value -eq "yes") -or ($value -eq "y"))
+      { return $true }
+      
+   if (($value -eq '$false') -or ($value -eq "false") -or ($value -eq "0") -or ($value -eq "no") -or ($value -eq "n") -or ($value -eq ""))
+      { return $false }
+      
+   throw "Cannot convert '$value' to boolean"
+   return $null
+}
+
+##########################################################################
+###
+### MAIN CODE STARTS HERE
+###
+##########################################################################
+
 # Pre-set two locations as nulls in case the XML file either doesn't exist
 # or the definitions are empty
 $data_loc = $null
 $recordings = $null
+$accept_single_bme = $null
+
+# If a configuration filename wasn't specified as a parameter, provide a default
+if ($configurationfile -eq "")
+{
+    Write-Host "No configuration file specified; defaulting to $i_am_here\WTV-MetaRenamer.xml"
+    $configurationfile = "$i_am_here\WTV-MetaRenamer.xml"
+}
 
 $my_config = New-Object XML
 try {
-    $my_config.Load("$i_am_here\WTV-MetaRenamer.xml")
-    $data_loc = $my_config.config.xml_cache
-    $recordings = $my_config.config.recordings
+   $my_config.Load($configurationfile)
+   $data_loc = $my_config.config.xml_cache
+   $recordings = $my_config.config.recordings
+   $accept_single_bme = SafeBooleanConvert $my_config.config.accept_single_bme
 }
 
 finally {
@@ -388,6 +568,10 @@ finally {
     # Default location where the script should be looking for recordings - the same directory as where the script is running from
     if (($recordings -eq $null) -or ($recordings -eq ""))
         { $recordings = "$i_am_here" }
+    
+    # By default, we will NOT accept single Best Match Episode results
+    if (($accept_single_bme -eq $null) -or ($accept_single_bme -eq ""))
+        { $accept_single_bme = $false }
 }
 
 # Undo log filename
@@ -590,6 +774,90 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
          }
 
          # That's all the tests we know to do
+
+         if ($this_episode -eq 0)
+         {
+            Write-Verbose "... no precise test"
+            # If we have 0, we've got one or more results from Best Match.
+            # If we have ONE match and $accept_single_bme is true, take that one.
+            # If we have more than one match and $interactive is true, offer the list to the user.
+
+            $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
+            foreach ($episode in $episodes.Data.Episode)
+            {
+                if (($lowest_score -eq 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0)))
+                    { $lowest_score = [int]$($episode.GetAttribute("ID")) }
+            }
+            Write-Verbose "... best matches have a score of $lowest_score"
+
+            $match_count = 0
+            foreach ($episode in $episodes.Data.Episode)
+            {
+                if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                {
+                    $match_count++
+                    $this_season = [int]$episode.SeasonNumber
+                    $this_episode = [int]$episode.EpisodeNumber
+                }
+            }
+
+            Write-Verbose "... got $match_count best matches"
+            if ($match_count -ne 1)
+            {
+                # We've got more than one match - are we running in interactive mode?
+                if ($interactive)
+                {
+                    # Yes - display the list and see which one the user picks
+                    $index = 1
+                    foreach ($episode in $episodes.Data.Episode)
+                    {
+                        if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                        {
+                            $s = $([int]$episode.SeasonNumber).ToString("0#")
+                            $e = $([int]$episode.EpisodeNumber).ToString("0#")
+                            Write-Host "... [$index] S$($s)E$($e) - $($episode.EpisodeName)"
+                            $index++
+                        }
+                    }
+
+                    # We end up with index being one too high ...
+                    $index--
+         
+                    Write-Host "... Enter a number from 1 to $index or RETURN to skip"
+                    $answer = GetInputFromUser $index
+                    if ($answer -ne -1)
+                    {
+                        # User provided an answer in the correct range so find it
+                        $index = 1
+                        foreach ($episode in $episodes.Data.Episode)
+                        {
+                            if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                            {
+                                if ($index -eq $answer)
+                                {
+                                    $this_season = [int]$episode.SeasonNumber
+                                    $this_episode = [int]$episode.EpisodeNumber
+                                }
+                                $index++
+                            }
+                        }
+                    }
+                    else
+                    {
+                        # User skipped - set episode to -1 so that we
+                        # drop through but don't list the "matching" episodes all over again
+                        $this_episode = -1
+                    }
+                }
+                else
+                {
+                    # No - reset $this_episode to 0 so that we drop through to
+                    # the code below that lists the matches
+                    $this_episode = 0
+                }
+            }
+         }
+
          if ($this_episode -gt 0)
          {
             Write-Host "... matched against season $this_season and episode $this_episode"
@@ -620,21 +888,25 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
          else
          {
             Write-Host "... failed to match TV programme precisely against the database"
-            # If $this_episode is -1, we matched multiple times so only list
-            # best matches if we truly didn't match anything.
+            # $this_episode can be -1 if we earlier matched against the episode
+            # database multiple times, or it can be 0 if we didn't match properly at all
+            # and we've only got Best Matches to work against.
+            #
+            # So only list Best Matches, and ignore any entries where the episode number is zero
+            # as that is a revoked entry in TvDB.
             if ($this_episode -eq 0)
             {
                 $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
                 foreach ($episode in $episodes.Data.Episode)
                 {
-                    if ([int]$($episode.GetAttribute("ID")) -lt $lowest_score)
+                    if (($lowest_score -eq 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0)))
                         { $lowest_score = [int]$($episode.GetAttribute("ID")) }
                 }
                 Write-Verbose "... best matches have a score of $lowest_score"
                 Write-Host "... possible matching programmes are:"
                 foreach ($episode in $episodes.Data.Episode)
                 {
-                    if ($($episode.GetAttribute("ID")) -eq $lowest_score)
+                    if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
                     {
                         $s = $([int]$episode.SeasonNumber).ToString("0#")
                         $e = $([int]$episode.EpisodeNumber).ToString("0#")
