@@ -14,6 +14,11 @@
 #          Fixed issue #285 - Add option to pick single matches
 #          Fixed issue #283 - Add interactive mode
 #          Fixed issue #337 - BME doesn't work if no valid episode name text can be found
+# 0.03     Improved handling if series/episode information isn't cached AND cannot be retrieved from thetvdb
+#          Tidied up handling of getting settings from the config file
+#          Implemented new functionality to optionally MOVE programmes instead of just renaming them
+#		   Move can either be to a single directory or to a series/season structure
+#		   Implemented new functionality to perform character remapping
 #
 # Original author: Philip Colmer
 
@@ -331,6 +336,14 @@ function FetchEpisodeInfo($series_id)
         
         # We got an error, so let's request the base information, extract
         # the en.xml file and save it as the info for this series.
+        
+        # But let's also cope with the possibility that we can't retrieve the XML data from the server either!
+        trap {
+            Write-Host "... got error while trying to retrieve episode information from server"
+            Write-Host "... "$_.Exception.Message
+            return $null
+        }        
+        
         $url = "$tvdb_mirror/api/$apikey/series/$series_ID/all/en.zip"
         $req = [System.Net.HttpWebRequest]::Create($url)
         $res = $req.GetResponse()
@@ -533,45 +546,258 @@ function SafeBooleanConvert([string]$value)
    return $null
 }
 
+function LoadConfigFile()
+{
+   # If a configuration filename wasn't specified as a parameter, provide a default
+   if ($configurationfile -eq "")
+   {
+      Write-Host "No configuration file specified; defaulting to $i_am_here\WTV-MetaRenamer.xml"
+      $configurationfile = "$i_am_here\WTV-MetaRenamer.xml"
+   }
+   
+   try {
+      $foo = New-Object XML
+      $foo.Load($configurationfile)
+      Write-Output $foo
+   }
+   
+   catch {
+      Write-Verbose "... error while loading config file: $($_.Exception.Message)"
+      Write-Output $null
+   }
+}
+
+function GetXMLCachePath()
+{
+   # Define the default result
+   # Default location where the script is caching data
+   $result = "$i_am_here\XML"
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.xml_cache -ne "")
+         { $result = $my_config.config.xml_cache }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving xml_cache elements: $($_.Exception.Message)"
+   }  
+   
+   Write-Output $result
+}
+
+function GetRecordingsPath()
+{
+   # Define the default result
+   # Default location where the script should be looking for recordings - the same directory as where the script is running from
+   $result = "$i_am_here"
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.recordings -ne "")
+         { $result = $my_config.config.recordings }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving recordings element: $($_.Exception.Message)"
+   }  
+   
+   Write-Output $result
+}
+
+function GetAcceptSingleBME()
+{
+   # Define the default result
+   # By default, we will NOT accept single Best Match Episode results
+   $result = $false
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.accept_single_bme -ne "")
+         { $result = SafeBooleanConvert $my_config.config.accept_single_bme }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving accept_single_bme element: $($_.Exception.Message)"
+   }  
+   
+   Write-Output $result
+}
+
+function GetMoveTo()
+{
+   # Define the default result
+   # By default, we will NOT move files, just rename them
+   $result = $null
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.move_to -ne "")
+         { $result = $my_config.config.move_to }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving move_to element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetMoveToSingleFolder()
+{
+   # Define the default result
+   # By default, we will NOT be moving files into a single folder, i.e. we
+   # will be moving to a series/season structure
+   $result = $false
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.move_to_single_folder -ne "")
+         { $result = SafeBooleanConvert $my_config.config.move_to_single_folder }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving move_to_single_folder element: $($_.Exception.Message)"
+   }  
+   
+   Write-Output $result
+}
+
+function GetSeasonFolderName()
+{
+   # Define the default result
+   # Default to "Season" if nothing else specified
+   $result = "Season"
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.season_folder_name -ne "")
+         { $result = $my_config.config.season_folder_name }
+   }
+
+   catch {
+      Write-Verbose "... error while retrieving season_folder_name element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetSeasonNumberFormat()
+{
+   # Define the default result
+   # Default to a two-digit format for season numbers
+   $result = "0#"
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.season_number_format -ne "")
+         { $result = $my_config.config.season_number_format }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving season_number_format element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetCharacterChangeMap()
+{
+   # Define the default result
+   # By default, we are not changing any characters
+   $result = $null
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.change_char -ne "")
+         { $result = $my_config.config.change_char }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving change_char element: $($_.Exception.Message)"
+   }  
+   
+   Write-Output $result
+}
+
+function CheckForUpdatesSinceLastRun()
+{
+	# See if we've been run before (i.e. we preserved the TvDB server time)
+	try
+	{
+	   $previous_time = New-Object XML
+	   $previous_time.Load("$data_loc\updates.xml")
+	}
+
+	catch
+	{
+	   $previous_time = $null
+	}
+
+	# Get the current server time and save it away. We do this before anything
+	# else as we always want to do this, even if this is the first run.
+	$server_time = FetchXml "http://www.thetvdb.com/api/Updates.php?type=none"
+	if ($server_time -ne $null)
+	   { $server_time.Save("$data_loc\updates.xml") }
+
+	# If we have a previous time, see which series have been updated since
+	# last time. For any series that we have been caching, delete the episode
+	# cache. This will cause the script to re-download the episode list if
+	# we need to.
+	if ($previous_time -ne $null)
+	{
+	    $time = $previous_time.items.time
+	    $changes = FetchXML "http://www.thetvdb.com/api/Updates.php?type=all&time=$time"
+	    if ($changes -ne $null)
+	    {
+	        foreach ($s in $changes.items.series)
+	        {
+	            if (Test-Path "$data_loc\EpInfo\$s.xml")
+	            {
+	                Write-Verbose "... series $s has been changed"
+	                Remove-Item "$data_loc\EpInfo\$s.xml"
+	            }
+	        }
+	    }
+	}
+}
+
+function RemapFilename($name)
+{
+	$new_name = $name
+	foreach ($cm in $char_map)
+	{
+		# convert the "from" string to an array so that we can check for one char at a time
+		$cma = $($cm.from).ToCharArray()
+		# then step through each character, trying to replace any occurences with the "to" string
+		foreach ($c in $cma)
+		{
+			$new_name = $new_name.Replace([string]$c, $cm.to)
+		}
+	}
+    
+    Write-Output $new_name
+}
+
 ##########################################################################
 ###
 ### MAIN CODE STARTS HERE
 ###
 ##########################################################################
 
-# Pre-set two locations as nulls in case the XML file either doesn't exist
-# or the definitions are empty
-$data_loc = $null
-$recordings = $null
-$accept_single_bme = $null
+$my_config = LoadConfigFile
+$data_loc = GetXMLCachePath
+$recordings = GetRecordingsPath
+$accept_single_bme = GetAcceptSingleBME
+$move_to = GetMoveTo
+$move_to_single_folder = GetMoveToSingleFolder
+$season_folder_name = GetSeasonFolderName
+$season_number_format = GetSeasonNumberFormat
+$char_map = GetCharacterChangeMap
 
-# If a configuration filename wasn't specified as a parameter, provide a default
-if ($configurationfile -eq "")
+if ($move_to_single_folder -eq $true -and $move_to.count -ne 1)
 {
-    Write-Host "No configuration file specified; defaulting to $i_am_here\WTV-MetaRenamer.xml"
-    $configurationfile = "$i_am_here\WTV-MetaRenamer.xml"
-}
-
-$my_config = New-Object XML
-try {
-   $my_config.Load($configurationfile)
-   $data_loc = $my_config.config.xml_cache
-   $recordings = $my_config.config.recordings
-   $accept_single_bme = SafeBooleanConvert $my_config.config.accept_single_bme
-}
-
-finally {
-    # Default location where the script is caching data
-    if (($data_loc -eq $null) -or ($data_loc -eq ""))
-        { $data_loc = "$i_am_here\XML" }
-    
-    # Default location where the script should be looking for recordings - the same directory as where the script is running from
-    if (($recordings -eq $null) -or ($recordings -eq ""))
-        { $recordings = "$i_am_here" }
-    
-    # By default, we will NOT accept single Best Match Episode results
-    if (($accept_single_bme -eq $null) -or ($accept_single_bme -eq ""))
-        { $accept_single_bme = $false }
+	Write-Host "WARNING! Move-to-single-folder is defined as true but more than one destination folder specified."
 }
 
 # Undo log filename
@@ -582,49 +808,13 @@ Write-Host "Undo log is called '$undo_log'"
 $apikey = "DE8C5EB3A19C799A"
 $tvdb_mirror = AllocateDBMirror
 
-# See if we've been run before (i.e. we preserved the TvDB server time)
-try
-{
-   $previous_time = New-Object XML
-   $previous_time.Load("$data_loc\updates.xml")
-}
-
-catch
-{
-   $previous_time = $null
-}
-
-# Get the current server time and save it away. We do this before anything
-# else as we always want to do this, even if this is the first run.
-$server_time = FetchXml "http://www.thetvdb.com/api/Updates.php?type=none"
-$server_time.Save("$data_loc\updates.xml")
-
-# If we have a previous time, see which series have been updated since
-# last time. For any series that we have been caching, delete the episode
-# cache. This will cause the script to re-download the episode list if
-# we need to.
-if ($previous_time -ne $null)
-{
-    $time = $previous_time.items.time
-    $changes = FetchXML "http://www.thetvdb.com/api/Updates.php?type=all&time=$time"
-    if ($changes -ne $null)
-    {
-        foreach ($s in $changes.items.series)
-        {
-            if (Test-Path "$data_loc\EpInfo\$s.xml")
-            {
-                Write-Verbose "... series $s has been changed"
-                Remove-Item "$data_loc\EpInfo\$s.xml"
-            }
-        }
-    }
-}
+CheckForUpdatesSinceLastRun
 
 # Now scan through all of the recordings and process
 $shell = New-Object -ComObject "Shell.Application"
 $folder = $shell.NameSpace($recordings)
 Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
-    Write-Host "Processing $_"
+	Write-Host "Processing $_"
     $file = $folder.ParseName($_.Name)
 
     # 0..300 | foreach { "$_ $($folder.GetDetailsOf($null, $_)) ... $($folder.GetDetailsOf($file, $_))" }
@@ -640,280 +830,358 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
     $series_ID = FetchSeriesID $this_title
     if ($series_ID -eq $null -and $this_title.IndexOf(":") -ne -1)
     {
-       # Let's see if the broadcaster has munged the title and episode name together
-       $series_ID = FetchSeriesID $($this_title.split(":")[0])
-       if ($series_ID -ne $null)
-       {
-          # Indicate that we may have the episode name in the title string for later parsing
-          $combined_title_and_episode = $true
-       }
+    	# Let's see if the broadcaster has munged the title and episode name together
+    	$series_ID = FetchSeriesID $($this_title.split(":")[0])
+		if ($series_ID -ne $null)
+		{
+			# Indicate that we may have the episode name in the title string for later parsing
+			$combined_title_and_episode = $true
+		}
     }
     if ($series_ID -ne $null)
     {
-        # Matched the series against the cache/database.
-        $this_season = 0
-        $this_episode = 0
-        # See if we can match the episode name.
-        $episodes = FetchEpisodeInfo $series_ID
-        # Start with the simplest approach - the subtitle entry.
-        $subtitle = $($folder.GetDetailsOf($file, 195))
-        if ($subtitle -ne "")
+		# Matched the series against the cache/database.
+		$this_season = 0
+		$this_episode = 0
+		# See if we can match the episode name.
+		$episodes = FetchEpisodeInfo $series_ID
+		if ($episodes -ne $null)
         {
-           Write-Verbose "... testing against the subtitle metadata"
-           $result = MatchEpisode $subtitle
-           $this_season = $result[0]
-           $this_episode = $result[1]
+           # Start with the simplest approach - the subtitle entry.
+           $subtitle = $($folder.GetDetailsOf($file, 195))
+           if ($subtitle -ne "")
+           {
+              Write-Verbose "... testing against the subtitle metadata"
+              $result = MatchEpisode $subtitle
+              $this_season = $result[0]
+              $this_episode = $result[1]
+           
+              if ($this_episode -eq 0)
+              {
+                 # We have a string but it didn't match so let's calculate the edit distances
+                 BestMatchEpisode $subtitle
+              }
+           }
+           if ($this_episode -eq 0)
+           {
+              # OK - subtitle entry doesn't work. Another common approach is for the
+              # description to start with the episode name and be terminated by a colon.
+              $try_this = $folder.GetDetailsOf($file, 258)
+              $try_this = $try_this.split(":")[0]
+
+              Write-Verbose "... testing against the description and colon delimiter"
+              $result = MatchEpisode $try_this
+              $this_season = $result[0]
+              $this_episode = $result[1]
+
+              if ($this_episode -eq 0)
+              {
+                 # We have a string but it didn't match so let's calculate the edit distances
+                 BestMatchEpisode $try_this
+              }
+           }
+           if ($this_episode -eq 0 -and $combined_title_and_episode -eq $true)
+           {
+              # We earlier matched against a title string that looked as if it
+              # was a combination of series name and episode name. Let's see if
+              # that really is the case.
+              $colon = $this_title.IndexOf(":")
+              $try_this = $this_title.substring($colon+1)
+              $try_this = $try_this.TrimStart()
+
+              Write-Verbose "... testing against title string combo of series and episode"
+              $result = MatchEpisode $try_this
+              $this_season = $result[0]
+              $this_episode = $result[1]
+
+              if ($this_episode -eq 0)
+              {
+                 # We have a string but it didn't match so let's calculate the edit distances
+                 BestMatchEpisode $try_this
+              }
+           }
+           if ($this_episode -eq 0)
+           {
+              # Look for a title embedded in the description but ending with a full-stop instead of a colon.
+              $try_this = $folder.GetDetailsOf($file, 258)
+              $try_this = $try_this.split(".")[0]
+
+              Write-Verbose "... testing against the description and full-stop delimiter"
+              $result = MatchEpisode $try_this
+              $this_season = $result[0]
+              $this_episode = $result[1]
+
+              if ($this_episode -eq 0)
+              {
+                 # We have a string but it didn't match so let's calculate the edit distances
+                 BestMatchEpisode $try_this
+              }
+           }
+           if ($this_episode -eq 0)
+           {
+              # The BBC sometimes put the title in the description, but prefix it with <episode number>/<episodes in series>.
+              # Look to see if that pattern has been followed.
+              $try_this = $folder.GetDetailsOf($file, 258)
+              $split_at = $try_this.IndexOf(". ")
+              if ($split_at -ne -1)
+              {
+                  # Break down the numbers, partly as a sanity check that we have got the correct structure, but
+                  # also to use the ep number provided to double-check things ... potentially!
+                  $slash = $try_this.IndexOf("/")
+                  if ($slash -ne -1 -and $slash -lt $split_at)
+                  {
+                      # Strip off the front stuff
+                      $try_this = $try_this.Substring($split_at+2, $try_this.Length - $split_at - 3)
+                      # Now look for a colon or full-stop after the episode name and split at
+                      # whichever comes first.
+                      $split_at = $try_this.IndexOf(":")
+                      $fullstop = $try_this.IndexOf(".")
+                      if ($split_at -eq -1)
+                      {
+                          # No colon so use where we found the full-stop
+                          $split_at = $fullstop
+                      }
+                      elseif ($fullstop -ne -1 -and $fullstop -lt $split_at)
+                      {
+                          # Full stop comes before a colon - use that
+                          $split_at = $fullstop
+                      }
+                      if ($split_at -ne -1)
+                      {
+                          $try_this = $try_this.Substring(0, $split_at)
+                      }
+
+                      Write-Verbose "... testing against BBC format description field"
+                      $result = MatchEpisode $try_this
+                      $this_season = $result[0]
+                      $this_episode = $result[1]
+
+                      if ($this_episode -eq 0)
+                      {
+                         # We have a string but it didn't match so let's calculate the edit distances
+                         BestMatchEpisode $try_this
+                      }
+                  }
+              }
+           }
+
+           # That's all the tests we know to do
            
            if ($this_episode -eq 0)
            {
-              # We have a string but it didn't match so let's calculate the edit distances
-              BestMatchEpisode $subtitle
-           }
-        }
-        if ($this_episode -eq 0)
-        {
-            # OK - subtitle entry doesn't work. Another common approach is for the
-            # description to start with the episode name and be terminated by a colon.
-            $try_this = $folder.GetDetailsOf($file, 258)
-            $try_this = $try_this.split(":")[0]
+              Write-Verbose "... no precise test"
+              # If we have 0, we've got one or more results from Best Match.
+              # If we have ONE match and $accept_single_bme is true, take that one.
+              # If we have more than one match and $interactive is true, offer the list to the user.
 
-            Write-Verbose "... testing against the description and colon delimiter"
-            $result = MatchEpisode $try_this
-            $this_season = $result[0]
-            $this_episode = $result[1]
+              $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
+              foreach ($episode in $episodes.Data.Episode)
+              {
+                  if (($lowest_score -eq 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0)))
+                      { $lowest_score = [int]$($episode.GetAttribute("ID")) }
+              }
+              Write-Verbose "... best matches have a score of $lowest_score"
 
-            if ($this_episode -eq 0)
-            {
-               # We have a string but it didn't match so let's calculate the edit distances
-               BestMatchEpisode $try_this
-            }
-         }
-         if ($this_episode -eq 0 -and $combined_title_and_episode -eq $true)
-         {
-            # We earlier matched against a title string that looked as if it
-            # was a combination of series name and episode name. Let's see if
-            # that really is the case.
-            $colon = $this_title.IndexOf(":")
-            $try_this = $this_title.substring($colon+1)
-            $try_this = $try_this.TrimStart()
+              $match_count = 0
+              foreach ($episode in $episodes.Data.Episode)
+              {
+                  if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                  {
+                      $match_count++
+                      $this_season = [int]$episode.SeasonNumber
+                      $this_episode = [int]$episode.EpisodeNumber
+                  }
+              }
 
-            Write-Verbose "... testing against title string combo of series and episode"
-            $result = MatchEpisode $try_this
-            $this_season = $result[0]
-            $this_episode = $result[1]
+              Write-Verbose "... got $match_count best matches"
+              if ($match_count -ne 1)
+              {
+                  # We've got more than one match - are we running in interactive mode?
+                  if ($interactive)
+                  {
+                      # Yes - display the list and see which one the user picks
+                      $index = 1
+                      foreach ($episode in $episodes.Data.Episode)
+                      {
+                          if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                          {
+                              $s = $([int]$episode.SeasonNumber).ToString("0#")
+                              $e = $([int]$episode.EpisodeNumber).ToString("0#")
+                              Write-Host "... [$index] S$($s)E$($e) - $($episode.EpisodeName)"
+                              $index++
+                          }
+                      }
 
-            if ($this_episode -eq 0)
-            {
-               # We have a string but it didn't match so let's calculate the edit distances
-               BestMatchEpisode $try_this
-            }
-         }
-         if ($this_episode -eq 0)
-         {
-            # Look for a title embedded in the description but ending with a full-stop instead of a colon.
-            $try_this = $folder.GetDetailsOf($file, 258)
-            $try_this = $try_this.split(".")[0]
-
-            Write-Verbose "... testing against the description and full-stop delimiter"
-            $result = MatchEpisode $try_this
-            $this_season = $result[0]
-            $this_episode = $result[1]
-
-            if ($this_episode -eq 0)
-            {
-               # We have a string but it didn't match so let's calculate the edit distances
-               BestMatchEpisode $try_this
-            }
-         }
-         if ($this_episode -eq 0)
-         {
-            # The BBC sometimes put the title in the description, but prefix it with <episode number>/<episodes in series>.
-            # Look to see if that pattern has been followed.
-            $try_this = $folder.GetDetailsOf($file, 258)
-            $split_at = $try_this.IndexOf(". ")
-            if ($split_at -ne -1)
-            {
-                # Break down the numbers, partly as a sanity check that we have got the correct structure, but
-                # also to use the ep number provided to double-check things ... potentially!
-                $slash = $try_this.IndexOf("/")
-                if ($slash -ne -1 -and $slash -lt $split_at)
-                {
-                    # Strip off the front stuff
-                    $try_this = $try_this.Substring($split_at+2, $try_this.Length - $split_at - 3)
-                    # Now look for a colon or full-stop after the episode name and split at
-                    # whichever comes first.
-                    $split_at = $try_this.IndexOf(":")
-                    $fullstop = $try_this.IndexOf(".")
-                    if ($split_at -eq -1)
-                    {
-                        # No colon so use where we found the full-stop
-                        $split_at = $fullstop
-                    }
-                    elseif ($fullstop -ne -1 -and $fullstop -lt $split_at)
-                    {
-                        # Full stop comes before a colon - use that
-                        $split_at = $fullstop
-                    }
-                    if ($split_at -ne -1)
-                    {
-                        $try_this = $try_this.Substring(0, $split_at)
-                    }
-                    
-                    Write-Verbose "... testing against BBC format description field"
-                    $result = MatchEpisode $try_this
-                    $this_season = $result[0]
-                    $this_episode = $result[1]
-
-                    if ($this_episode -eq 0)
-                    {
-                       # We have a string but it didn't match so let's calculate the edit distances
-                       BestMatchEpisode $try_this
-                    }
-                }
-            }
-         }
-
-         # That's all the tests we know to do
-
-         if ($this_episode -eq 0)
-         {
-            Write-Verbose "... no precise test"
-            # If we have 0, we've got one or more results from Best Match.
-            # If we have ONE match and $accept_single_bme is true, take that one.
-            # If we have more than one match and $interactive is true, offer the list to the user.
-
-            $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
-            foreach ($episode in $episodes.Data.Episode)
-            {
-                if (($lowest_score -eq 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0)))
-                    { $lowest_score = [int]$($episode.GetAttribute("ID")) }
-            }
-            Write-Verbose "... best matches have a score of $lowest_score"
-
-            $match_count = 0
-            foreach ($episode in $episodes.Data.Episode)
-            {
-                if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
-                {
-                    $match_count++
-                    $this_season = [int]$episode.SeasonNumber
-                    $this_episode = [int]$episode.EpisodeNumber
-                }
-            }
-
-            Write-Verbose "... got $match_count best matches"
-            if ($match_count -ne 1)
-            {
-                # We've got more than one match - are we running in interactive mode?
-                if ($interactive)
-                {
-                    # Yes - display the list and see which one the user picks
-                    $index = 1
-                    foreach ($episode in $episodes.Data.Episode)
-                    {
-                        if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
-                        {
-                            $s = $([int]$episode.SeasonNumber).ToString("0#")
-                            $e = $([int]$episode.EpisodeNumber).ToString("0#")
-                            Write-Host "... [$index] S$($s)E$($e) - $($episode.EpisodeName)"
-                            $index++
-                        }
-                    }
-
-                    # We end up with index being one too high ...
-                    $index--
+                      # We end up with index being one too high ...
+                      $index--
          
-                    Write-Host "... Enter a number from 1 to $index or RETURN to skip"
-                    $answer = GetInputFromUser $index
-                    if ($answer -ne -1)
-                    {
-                        # User provided an answer in the correct range so find it
-                        $index = 1
-                        foreach ($episode in $episodes.Data.Episode)
-                        {
-                            if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
-                            {
-                                if ($index -eq $answer)
-                                {
-                                    $this_season = [int]$episode.SeasonNumber
-                                    $this_episode = [int]$episode.EpisodeNumber
-                                }
-                                $index++
-                            }
-                        }
-                    }
-                    else
-                    {
-                        # User skipped - set episode to -1 so that we
-                        # drop through but don't list the "matching" episodes all over again
-                        $this_episode = -1
-                    }
-                }
-                else
-                {
-                    # No - reset $this_episode to 0 so that we drop through to
-                    # the code below that lists the matches
-                    $this_episode = 0
-                }
-            }
-         }
+                      Write-Host "... Enter a number from 1 to $index or RETURN to skip"
+                      $answer = GetInputFromUser $index
+                      if ($answer -ne -1)
+                      {
+                          # User provided an answer in the correct range so find it
+                          $index = 1
+                          foreach ($episode in $episodes.Data.Episode)
+                          {
+                              if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                              {
+                                  if ($index -eq $answer)
+                                  {
+                                      $this_season = [int]$episode.SeasonNumber
+                                      $this_episode = [int]$episode.EpisodeNumber
+                                  }
+                                  $index++
+                              }
+                          }
+                      }
+                      else
+                      {
+                          # User skipped - set episode to -1 so that we
+                          # drop through but don't list the "matching" episodes all over again
+                          $this_episode = -1
+                      }
+                  }
+                  else
+                  {
+                      # No - reset $this_episode to 0 so that we drop through to
+                      # the code below that lists the matches
+                      $this_episode = 0
+                  }
+              }
+           }
 
-         if ($this_episode -gt 0)
-         {
-            Write-Host "... matched against season $this_season and episode $this_episode"
-            # Retrieve the TvDB version of the episode name
-            $episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $this_episode }
-            # Build the name we are going to rename to
-            $new_name = "$($episodes.Data.Series.SeriesName) - S$($this_season.ToString("0#"))E$($this_episode.ToString("0#")) - $($episode_data.EpisodeName).wtv"
-            # Does a file of this name already exist?
-            if (!(Test-Path "$recordings\$new_name"))
-            {
-                Write-Host "... renaming to '$new_name'"
-                Rename-Item "$recordings\$_" "$new_name" -ErrorAction "SilentlyContinue"
-                if ($?)
-                {
-                    # If we didn't get an error, write the reverse command out to an undo log file
-                    "Rename-Item ""$recordings\$new_name"" ""$_""" >> $undo_log
-                }
-                else
-                {
-                    Write-Host "... error during rename: $($error[0])"
-                }
-            }
-            else
-            {
-                Write-Host "... skipping rename as file of that name already exists"
-            }
-         }
-         else
-         {
-            Write-Host "... failed to match TV programme precisely against the database"
-            # $this_episode can be -1 if we earlier matched against the episode
-            # database multiple times, or it can be 0 if we didn't match properly at all
-            # and we've only got Best Matches to work against.
-            #
-            # So only list Best Matches, and ignore any entries where the episode number is zero
-            # as that is a revoked entry in TvDB.
-            if ($this_episode -eq 0)
-            {
-                $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
-                foreach ($episode in $episodes.Data.Episode)
-                {
-                    if (($lowest_score -eq 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0)))
-                        { $lowest_score = [int]$($episode.GetAttribute("ID")) }
-                }
-                Write-Verbose "... best matches have a score of $lowest_score"
-                Write-Host "... possible matching programmes are:"
-                foreach ($episode in $episodes.Data.Episode)
-                {
-                    if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
-                    {
-                        $s = $([int]$episode.SeasonNumber).ToString("0#")
-                        $e = $([int]$episode.EpisodeNumber).ToString("0#")
-                        Write-Host "... S$($s)E$($e) - $($episode.EpisodeName)"
-                    }
-                }
-            }
-         }
-    }
+           if ($this_episode -gt 0)
+           {
+              Write-Host "... matched against season $this_season and episode $this_episode"
+              # Retrieve the TvDB version of the episode name
+              $episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $this_episode }
+              # Build the name we are going to rename to
+              $new_name = "$($episodes.Data.Series.SeriesName) - S$($this_season.ToString("0#"))E$($this_episode.ToString("0#")) - $($episode_data.EpisodeName).wtv"
+              # Now perform any required character remapping
+              Write-Verbose "... got interim name of $new_name"
+              $new_name = RemapFilename $new_name
+              Write-Verbose "... remapped name is $new_name"
+            
+              # Rename or move?
+              if ($move_to -ne $null)
+              {
+                  # Move - but are we moving to a single folder or to a series structure?
+				  if ($move_to_single_folder -eq $true)
+				  {
+					$dest_folder = $move_to[0]
+				  }
+				  else
+				  {
+					  # let's see if we can find a folder with the series name
+	                  $series_path = $null
+	                  foreach ($path in $move_to)
+	                  {
+	                     Write-Verbose "... checking $path\$($episodes.Data.Series.SeriesName)"
+	                     if (Test-Path "$path\$($episodes.Data.Series.SeriesName)")
+	                     {
+	                        Write-Verbose "... found series under path $path"
+	                        $series_path = "$path\$($episodes.Data.Series.SeriesName)"
+	                     }
+	                  }
+	                
+	                  # If we didn't find the series, try creating it under the first path
+	                  if ($series_path -eq $null)
+	                  {
+	                     $series_path = "$($move_to[0])\$($episodes.Data.Series.SeriesName)"
+	                     Write-Verbose "... creating series folder in $series_path"
+	                     New-Item $series_path -type directory > $null
+	                  }
+	                
+	                  # Now look for the season folder
+	                  $season_path = $null
+	                  if (Test-Path "$series_path\$season_folder_name $($this_season.ToString("$season_number_format"))")
+	                  {
+	                     $season_path = "$series_path\$season_folder_name $($this_season.ToString("$season_number_format"))"
+	                  }
+	                  else
+	                  {
+	                     # If we didn't find the season folder, create it
+	                     $season_path = "$series_path\$season_folder_name $($this_season.ToString("$season_number_format"))"
+	                     Write-Verbose "... creating season folder in $season_path"
+	                     New-Item $season_path -type directory > $null
+	                  }
+					  
+					  $dest_folder = $season_path
+				  }
+                
+                  # See if the file already exists there
+                  if (!(Test-Path "$dest_folder\$new_name"))
+                  {
+                      Write-Host "... moving to '$dest_folder\$new_name'"
+                      Move-Item "$recordings\$_" "$dest_folder\$new_name" -ErrorAction "SilentlyContinue"
+                      if ($?)
+                      {
+                          # If we didn't get an error, write the reverse command out to an undo log file
+                          "Move-Item ""$dest_folder\$new_name"" ""$recordings\$_""" >> $undo_log
+                      }
+                      else
+                      {
+                          Write-Host "... error during move: $($error[0])"
+                      }
+                  }
+                  else
+                  {
+                      Write-Host "... skipping move as file of that name already exists"
+                  }
+              }
+              else
+              {
+                 # Rename - does a file of this name already exist?
+                 if (!(Test-Path "$recordings\$new_name"))
+                 {
+                     Write-Host "... renaming to '$new_name'"
+                     Rename-Item "$recordings\$_" "$new_name" -ErrorAction "SilentlyContinue"
+                     if ($?)
+                     {
+                         # If we didn't get an error, write the reverse command out to an undo log file
+                         "Rename-Item ""$recordings\$new_name"" ""$_""" >> $undo_log
+                     }
+                     else
+                     {
+                         Write-Host "... error during rename: $($error[0])"
+                     }
+                 }
+                 else
+                 {
+                     Write-Host "... skipping rename as file of that name already exists"
+                 }
+              }
+           }
+           else
+           {
+              Write-Host "... failed to match TV programme precisely against the database"
+              # $this_episode can be -1 if we earlier matched against the episode
+              # database multiple times, or it can be 0 if we didn't match properly at all
+              # and we've only got Best Matches to work against.
+              #
+              # So only list Best Matches, and ignore any entries where the episode number is zero
+              # as that is a revoked entry in TvDB.
+              if ($this_episode -eq 0)
+              {
+                  $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
+                  foreach ($episode in $episodes.Data.Episode)
+                  {
+                      if (($lowest_score -eq 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0)))
+                          { $lowest_score = [int]$($episode.GetAttribute("ID")) }
+                  }
+                  Write-Verbose "... best matches have a score of $lowest_score"
+                  Write-Host "... possible matching programmes are:"
+                  foreach ($episode in $episodes.Data.Episode)
+                  {
+                      if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                      {
+                          $s = $([int]$episode.SeasonNumber).ToString("0#")
+                          $e = $([int]$episode.EpisodeNumber).ToString("0#")
+                          Write-Host "... S$($s)E$($e) - $($episode.EpisodeName)"
+                      }
+                  }
+              }
+           }
+      }
+   }
 }
