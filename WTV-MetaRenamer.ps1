@@ -19,6 +19,7 @@
 #          Implemented new functionality to optionally MOVE programmes instead of just renaming them
 #		   Move can either be to a single directory or to a series/season structure
 #		   Implemented new functionality to perform character remapping
+# 0.04     Fixed bug in handling of $move_to; added tests for whether or not it is an array
 #
 # Original author: Philip Colmer
 
@@ -795,7 +796,7 @@ $season_folder_name = GetSeasonFolderName
 $season_number_format = GetSeasonNumberFormat
 $char_map = GetCharacterChangeMap
 
-if ($move_to_single_folder -eq $true -and $move_to.count -ne 1)
+if (($move_to_single_folder -eq $true) -and ($move_to -is [Array]) -and ($move_to.count -ne 1))
 {
 	Write-Host "WARNING! Move-to-single-folder is defined as true but more than one destination folder specified."
 }
@@ -1068,7 +1069,14 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
                   # Move - but are we moving to a single folder or to a series structure?
 				  if ($move_to_single_folder -eq $true)
 				  {
-					$dest_folder = $move_to[0]
+                    if ($move_to -is [Array])
+                    {
+                        $dest_folder = $move_to[0]
+                    }
+                    else
+                    {
+                        $dest_folder = $move_to
+                    }
 				  }
 				  else
 				  {
