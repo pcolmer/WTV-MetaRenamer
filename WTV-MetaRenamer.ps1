@@ -25,12 +25,16 @@
 #            flag & code to control if the recording is deleted if the destination file already exists
 #            flag & code to control operating on a recording if it is older than the minimum age (#465)
 #            flag & code to control ignoring certain series (#416)
+# 0.06     Fixed bug in test to check for colon in description. Now looks for colon and a space so that "4:50 From Paddington"
+#            doesn't get mis-parsed. Similar change made for ". "
+#          Fixed bug in loading of booleans from XML config file
+#          Fixed bug in handling of min_age functionality
 #
 # Original author: Philip Colmer
 
 param([string]$configurationfile, [switch]$interactive)
 
-$VerbosePreference = "Continue"
+$VerbosePreference = "SilentlyContinue"
 Set-StrictMode –version Latest
 
 $i_am_here = $(Get-Location -PSProvider FileSystem)
@@ -716,7 +720,7 @@ function GetCreateSeriesFolderIfMissing()
    try {
       # Only override the default value if a value has actually been provided!
       if ($my_config.config.create_series_folder_if_missing -ne "")
-         { $result = $my_config.config.create_series_folder_if_missing }
+         { $result = SafeBooleanConvert $my_config.config.create_series_folder_if_missing }
    }
    
    catch {
@@ -735,7 +739,7 @@ function GetDeleteIfDestExists()
    try {
       # Only override the default value if a value has actually been provided!
       if ($my_config.config.delete_if_dest_exists -ne "")
-         { $result = $my_config.config.delete_if_dest_exists }
+         { $result = SafeBooleanConvert $my_config.config.delete_if_dest_exists }
    }
    
    catch {
@@ -901,6 +905,7 @@ CheckForUpdatesSinceLastRun
 if ($min_age -ne $null)
 {
     $min_age = (Get-Date).AddDays(-([int]$min_age))
+	Write-Verbose "... will only process files older than $min_age"
 }
 
 # Now scan through all of the recordings and process
@@ -928,6 +933,9 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
     if ($min_age -ne $null)
     {
         $date_created = $($folder.GetDetailsOf($file, 4))
+        # This is a string so we need to convert it into a date/time value
+        $date_created = [datetime]::ParseExact($date_created, "g", $null)
+		Write-Verbose "... got creation date of $date_created"
         if ($date_created -ge $min_age)
         {
             $old_enough = $false
@@ -992,9 +1000,9 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	if ($this_episode -eq 0)
 	           	{
 	            	# OK - subtitle entry doesn't work. Another common approach is for the
-	            	# description to start with the episode name and be terminated by a colon.
+	            	# description to start with the episode name and be terminated by a colon and a space.
 	            	$try_this = $folder.GetDetailsOf($file, 258)
-	            	$try_this = $try_this.split(":")[0]
+	            	$try_this = [regex]::split($try_this, ': ')[0]
 
 	              	Write-Verbose "... testing against the description and colon delimiter"
 	              	$result = MatchEpisode $try_this
@@ -1031,7 +1039,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	{
 	              	# Look for a title embedded in the description but ending with a full-stop instead of a colon.
 	              	$try_this = $folder.GetDetailsOf($file, 258)
-	              	$try_this = $try_this.split(".")[0]
+	            	$try_this = [regex]::split($try_this, '. ')[0]
 
 	              	Write-Verbose "... testing against the description and full-stop delimiter"
 	              	$result = MatchEpisode $try_this
