@@ -29,6 +29,9 @@
 #            doesn't get mis-parsed. Similar change made for ". "
 #          Fixed bug in loading of booleans from XML config file
 #          Fixed bug in handling of min_age functionality
+# 0.07     Fixed bug introduced in the previous change of handling of regex usage (#511)
+#          Added a check in RemapFilename to make sure we've actually got some char mappings (#513)
+#          Fixed bug in FetchSeriesID so that broadcaster's programme name is saved, not TvDB's (#507)
 #
 # Original author: Philip Colmer
 
@@ -455,7 +458,8 @@ function FetchSeriesID($series_name)
                $series_xml = @($series_list.Data.Series)[0]
                $new_series_xml = $series_xml.Clone()
                $new_series_xml.seriesid = $this_series.seriesid
-               $new_series_xml.SeriesName = $this_series.SeriesName
+               # Changed to save *broadcaster's* series name, not TvDB's
+               $new_series_xml.SeriesName = $series_name # $this_series.SeriesName
                $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
                $series_list.Save("$data_loc\SeriesList.xml")
          
@@ -473,7 +477,8 @@ function FetchSeriesID($series_name)
          $series_xml = @($series_list.Data.Series)[0]
          $new_series_xml = $series_xml.Clone()
          $new_series_xml.seriesid = $series_info.Data.Series.seriesid
-         $new_series_xml.SeriesName = $series_info.Data.Series.SeriesName
+         # Changed to save *broadcaster's* series name, not TvDB's
+         $new_series_xml.SeriesName = $series_name # $series_info.Data.Series.SeriesName
          $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
          $series_list.Save("$data_loc\SeriesList.xml")
          
@@ -851,16 +856,19 @@ function CheckForUpdatesSinceLastRun()
 function RemapFilename($name)
 {
 	$new_name = $name
-	foreach ($cm in $char_map)
-	{
-		# convert the "from" string to an array so that we can check for one char at a time
-		$cma = $($cm.from).ToCharArray()
-		# then step through each character, trying to replace any occurences with the "to" string
-		foreach ($c in $cma)
-		{
-			$new_name = $new_name.Replace([string]$c, $cm.to)
-		}
-	}
+    if ($char_map -ne $null)
+    {
+    	foreach ($cm in $char_map)
+	    {
+		    # convert the "from" string to an array so that we can check for one char at a time
+		    $cma = $($cm.from).ToCharArray()
+		    # then step through each character, trying to replace any occurences with the "to" string
+		    foreach ($c in $cma)
+		    {
+			    $new_name = $new_name.Replace([string]$c, $cm.to)
+		    }
+	    }
+    }
     
     Write-Output $new_name
 }
@@ -1039,7 +1047,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	{
 	              	# Look for a title embedded in the description but ending with a full-stop instead of a colon.
 	              	$try_this = $folder.GetDetailsOf($file, 258)
-	            	$try_this = [regex]::split($try_this, '. ')[0]
+	            	$try_this = [regex]::split($try_this, '\. ')[0]
 
 	              	Write-Verbose "... testing against the description and full-stop delimiter"
 	              	$result = MatchEpisode $try_this
