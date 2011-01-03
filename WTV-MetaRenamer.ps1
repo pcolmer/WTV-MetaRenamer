@@ -145,7 +145,7 @@ function Write-HostAndLog($str)
 {
     # Only output to host if running in interactive mode OR
     # we aren't outputting to the log file
-    if ($interactive -eq $true -or $create_processing_logs -eq $null)
+    if ($interactive -eq $true -or $create_processing_logs -eq $false)
 	    { Write-Host $str}
 	if ($create_processing_logs)
 		{ $str >> $processing_log }
