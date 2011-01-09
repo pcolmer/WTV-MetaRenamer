@@ -38,6 +38,9 @@
 #          New functionality to move duplicates to a different folder for storage in case of errors either in the script
 #             or in previous recordings of the same episode.
 #          Tweak BME processing so that if the number of changes required is > 50% the length of the string, it is ignored.
+# 0.09     Added support for non-English languages.
+#          Added configuration item to support different formats of renaming.
+#          Added configuration item to move ignored programmes to a folder.
 #
 # Original author: Philip Colmer
 
@@ -165,6 +168,23 @@ function FetchXml($url)
       $result = $null
    }
    Write-Output $result
+}
+
+function NodeExists($xmlnode, $to_match)
+{
+	$this_node = $xmlnode.FirstChild
+	do
+	{
+		if ($this_node.name -eq $to_match)
+		{
+			return $true
+		}
+		
+		$this_node = $this_node.NextSibling
+	} while ($this_node -ne $null)
+	
+	# Failed to match the node name we are looking for
+	Write-Output $false
 }
 
 function AllocateDBMirror
@@ -366,14 +386,16 @@ function MatchEpisode($text)
    }
 }
 
-function FetchEpisodeInfo($series_id)
+function FetchEpisodeInfo($series_info)
 {
+	$this_series_id = $series_info[0]
+	$this_series_lang = $series_info[1]
     # Have we already got the episode information for this series? If we
     # have, load it and return.
     $episode_info = New-Object XML
     try
     {
-        $episode_info.Load("$data_loc\EpInfo\$series_ID.xml")
+        $episode_info.Load("$data_loc\EpInfo\$this_series_id.xml")
         Write-VerboseAndLog "... retrieved episode information from cache"
     }
 
@@ -387,11 +409,11 @@ function FetchEpisodeInfo($series_id)
         # But let's also cope with the possibility that we can't retrieve the XML data from the server either!
         trap {
             Write-HostAndLog "... got error while trying to retrieve episode information from server"
-            Write-HostAndLog "... "$_.Exception.Message
+            Write-HostAndLog "... $($_.Exception.Message)"
             return $null
         }        
         
-        $url = "$tvdb_mirror/api/$apikey/series/$series_ID/all/en.zip"
+        $url = "$tvdb_mirror/api/$apikey/series/$this_series_id/all/$this_series_lang.zip"
         $req = [System.Net.HttpWebRequest]::Create($url)
         $res = $req.GetResponse()
         if ($res.StatusCode -eq 200)
@@ -409,16 +431,16 @@ function FetchEpisodeInfo($series_id)
             $writer.Close()
             $res.Close()
       
-            # Now extract "en.xml" from the Zip file
+            # Now extract "<language>.xml" from the Zip file
             $zip = New-Object Ionic.Zip.ZipFile("$data_loc\EpInfo\Tmp.zip")
-            $zip_item = $zip["en.xml"]
+            $zip_item = $zip["$this_series_lang.xml"]
             $zip_item.Extract("$data_loc\EpInfo")
             $zip.Dispose()
       
             # Delete the zip file and rename the XML file
             Remove-Item "$data_loc\EpInfo\Tmp.zip"
-            Rename-Item "$data_loc\EpInfo\en.xml" "$series_ID.xml"
-            $episode_info.Load("$data_loc\EpInfo\$series_ID.xml")
+            Rename-Item "$data_loc\EpInfo\$this_series_lang.xml" "$this_series_id.xml"
+            $episode_info.Load("$data_loc\EpInfo\$this_series_id.xml")
             Write-VerboseAndLog "... downloaded episode information from server"
         }
         else
@@ -449,148 +471,163 @@ function FetchEpisodeInfo($series_id)
 
 function FetchSeriesID($series_name)
 {
-   # Make sure we have been given a series name!
-   if ($series_name -eq "")
-   {
-      Write-HostAndLog "... no series name provided"
-      return $null
-   }
+	# Make sure we have been given a series name!
+	if ($series_name -eq "")
+	{
+		Write-HostAndLog "... no series name provided"
+		return $null
+	}
 
-   # Check to see if the series name has been entered into the cached series database
-   $series_list = New-Object XML
-   $series_list.Load("$data_loc\SeriesList.xml")
-   $this_series = $series_list.Data.Series | Where-Object { $_.SeriesName -eq $series_name }
+	# Check to see if the series name has been entered into the cached series database
+	$series_list = New-Object XML
+	$series_list.Load("$data_loc\SeriesList.xml")
+	$this_series = $series_list.Data.Series | Where-Object { $_.SeriesName -eq $series_name }
    
-   if ($this_series -ne $null)
-   {
-       # Got a match - return the series ID
-       Write-VerboseAndLog "... FetchSeriesID returning $($this_series.seriesid) from cache"
-       Write-Output $this_series.seriesid
-       return
-   }
-
-   # If it hasn't, try to retrieve the series ID from TvDB. If only one series is returned
-   # we'll go with that. If more than one, list them out for the user to manually update
-   # the file and then bork.
-   $series_info = FetchXML "$tvdb_mirror/api/GetSeries.php?seriesname='$series_name'"
-   if (($series_info -ne $null) -and ($series_info.data -ne ""))
-   {
-      $count = 0
-      foreach ($this_series in $series_info.Data.Series) { $count++ }
-      
-      if ($count -gt 1)
-      {
-         # More than one match returned from TvDB - but does one of them match completely?
-         Write-VerboseAndLog "... TvDB has returned multiple matches"
-         
-         foreach ($this_series in $series_info.Data.Series)
-         {
-            if ($this_series.SeriesName -eq $series_name)
-            {
-               Write-VerboseAndLog "... got precise match"
-               # Add the series information automatically to the list file
-               $series_xml = @($series_list.Data.Series)[0]
-               $new_series_xml = $series_xml.Clone()
-               $new_series_xml.seriesid = $this_series.seriesid
-               # Changed to save *broadcaster's* series name, not TvDB's
-               $new_series_xml.SeriesName = $series_name # $this_series.SeriesName
-               $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
-               $series_list.Save("$data_loc\SeriesList.xml")
-         
-               Write-VerboseAndLog "... returning $($this_series.seriesid)"
-               Write-Output $this_series.seriesid
-               return
-            }
-         }
-      }
-   
-      if ($count -eq 1)
-      {
-         Write-VerboseAndLog "... FetchSeriesID has retrieved one match from TvDB"
-         # Add the series information automatically to the list file
-         $series_xml = @($series_list.Data.Series)[0]
-         $new_series_xml = $series_xml.Clone()
-         $new_series_xml.seriesid = $series_info.Data.Series.seriesid
-         # Changed to save *broadcaster's* series name, not TvDB's
-         $new_series_xml.SeriesName = $series_name # $series_info.Data.Series.SeriesName
-         $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
-         $series_list.Save("$data_loc\SeriesList.xml")
-         
-         Write-VerboseAndLog "... returning $($series_info.Data.Series.seriesid)"
-         Write-Output $series_info.Data.Series.seriesid
-      }
-      else
-      {
-	  	if ($interactive)
+	if ($this_series -ne $null)
+	{
+		# Got a match - return the series ID
+		Write-VerboseAndLog "... FetchSeriesID returning $($this_series.seriesid) from cache"
+		Write-Output $this_series.seriesid
+		# If this entry in the cache specifies a language code, return that, otherwise
+		# return the default language code.
+		if (NodeExists $this_series "language")
 		{
-        	Write-Host "More than one series matches series name '$series_name':"
+			Write-VerboseAndLog "... returning language code $($this_series.language)"
+			Write-Output $this_series.language
 		}
 		else
 		{
-        	Write-HostAndLog "More than one series matches series name '$series_name':"
+			Write-VerboseAndLog "... returning default language code $default_language"
+			Write-Output $default_language
 		}
-		$index = 1
-		foreach ($this_series in $series_info.Data.Series)
+		return
+	}
+
+	# If it hasn't, try to retrieve the series ID from TvDB. If only one series is returned
+	# we'll go with that. If more than one, list them out for the user to manually update
+	# the file and then bork.
+	$series_info = FetchXML "$tvdb_mirror/api/GetSeries.php?seriesname='$series_name'"
+	if (($series_info -ne $null) -and ($series_info.data -ne ""))
+	{
+		$count = 0
+		foreach ($this_series in $series_info.Data.Series) { $count++ }
+      
+		if ($count -gt 1)
+		{
+			# More than one match returned from TvDB - but does one of them match completely?
+			Write-VerboseAndLog "... TvDB has returned multiple matches"
+         
+			foreach ($this_series in $series_info.Data.Series)
+			{
+				if ($this_series.SeriesName -eq $series_name)
+				{
+					Write-VerboseAndLog "... got precise match"
+					# Add the series information automatically to the list file
+					$series_xml = @($series_list.Data.Series)[0]
+					$new_series_xml = $series_xml.Clone()
+					$new_series_xml.seriesid = $this_series.seriesid
+					# Changed to save *broadcaster's* series name, not TvDB's
+					$new_series_xml.SeriesName = $series_name # $this_series.SeriesName
+					$rubbish_output = $series_list.Data.AppendChild($new_series_xml)
+					$series_list.Save("$data_loc\SeriesList.xml")
+
+					Write-VerboseAndLog "... returning $($this_series.seriesid) and language $default_language"
+					Write-Output $this_series.seriesid
+					Write-Output $default_language
+					return
+				}
+			}
+		}
+   
+		if ($count -eq 1)
+		{
+			Write-VerboseAndLog "... FetchSeriesID has retrieved one match from TvDB"
+			# Add the series information automatically to the list file
+			$series_xml = @($series_list.Data.Series)[0]
+			$new_series_xml = $series_xml.Clone()
+			$new_series_xml.seriesid = $series_info.Data.Series.seriesid
+			# Changed to save *broadcaster's* series name, not TvDB's
+			$new_series_xml.SeriesName = $series_name # $series_info.Data.Series.SeriesName
+			$rubbish_output = $series_list.Data.AppendChild($new_series_xml)
+			$series_list.Save("$data_loc\SeriesList.xml")
+
+			Write-VerboseAndLog "... returning $($series_info.Data.Series.seriesid) and language $default_language"
+			Write-Output $series_info.Data.Series.seriesid
+			Write-Output $default_language
+		}
+		else
 		{
 			if ($interactive)
 			{
-				Write-Host "... [$index] $($this_series.SeriesName)"
+				Write-Host "More than one series matches series name '$series_name':"
 			}
 			else
 			{
-				Write-HostAndLog "ID: $($this_series.seriesid); Name: $($this_series.SeriesName)"
+        		Write-HostAndLog "More than one series matches series name '$series_name':"
 			}
-			$index++
-		}
-         
-		# We end up with index being one too high ...
-		$index--
-         
-		if ($interactive)
-		{
-			Write-Host "... Enter a number from 1 to $index or RETURN to skip"
-			$answer = GetInputFromUser $index
-			if ($answer -ne -1)
+			$index = 1
+			foreach ($this_series in $series_info.Data.Series)
 			{
-				# User provided an answer in the correct range so find it and return
-				# that to the function caller
-				$index = 1
-				foreach ($this_series in $series_info.Data.Series)
+				if ($interactive)
 				{
-					if ($index -eq $answer)
-					{
-						# Add the series information automatically to the list file
-                        # N.B. Because there were multiple matches for the series name
-                        # provided, and the user has made their choice, we are going to
-                        # record the pairing of the series name PROVIDED and the matching
-                        # series ID. We DON'T record the *actual* series name otherwise
-                        # it won't match next time either!
-						
-						Write-VerboseAndLog "... series ID selected as $($this_series.seriesid)"
-						
-                        $series_xml = @($series_list.Data.Series)[0]
-                        $new_series_xml = $series_xml.Clone()
-                        $new_series_xml.seriesid = $this_series.seriesid
-                        $new_series_xml.SeriesName = $series_name
-                        $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
-                        $series_list.Save("$data_loc\SeriesList.xml")
-
-                        Write-Output $this_series.seriesid
-                        return
-                    }
-                    $index++
-                }
-            }
-         }
+					Write-Host "... [$index] $($this_series.SeriesName)"
+				}
+				else
+				{
+					Write-HostAndLog "ID: $($this_series.seriesid); Name: $($this_series.SeriesName)"
+				}
+				$index++
+			}
          
-         return $null
-      }
-   }
-   else
-   {
-      Write-VerboseAndLog "... failed to retrieve series information from TvDB"
-      return $null
-   }
+			# We end up with index being one too high ...
+			$index--
+	         
+			if ($interactive)
+			{
+				Write-Host "... Enter a number from 1 to $index or RETURN to skip"
+				$answer = GetInputFromUser $index
+				if ($answer -ne -1)
+				{
+					# User provided an answer in the correct range so find it and return
+					# that to the function caller
+					$index = 1
+					foreach ($this_series in $series_info.Data.Series)
+					{
+						if ($index -eq $answer)
+						{
+							# Add the series information automatically to the list file
+	                        # N.B. Because there were multiple matches for the series name
+	                        # provided, and the user has made their choice, we are going to
+	                        # record the pairing of the series name PROVIDED and the matching
+	                        # series ID. We DON'T record the *actual* series name otherwise
+	                        # it won't match next time either!
+							
+							Write-VerboseAndLog "... series ID selected as $($this_series.seriesid)"
+							
+	                        $series_xml = @($series_list.Data.Series)[0]
+	                        $new_series_xml = $series_xml.Clone()
+	                        $new_series_xml.seriesid = $this_series.seriesid
+	                        $new_series_xml.SeriesName = $series_name
+	                        $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
+	                        $series_list.Save("$data_loc\SeriesList.xml")
+
+	                        Write-Output $this_series.seriesid
+							Write-Output $default_language
+	                        return
+	                    }
+	                    $index++
+					}
+				}
+			}
+         
+			return $null
+		}
+	}
+	else
+	{
+		Write-VerboseAndLog "... failed to retrieve series information from TvDB"
+		return $null
+	}
 }
 
 function SafeBooleanConvert([string]$value)
@@ -635,14 +672,21 @@ function CheckForUpdatesSinceLastRun()
 	    $changes = FetchXML "http://www.thetvdb.com/api/Updates.php?type=all&time=$time"
 	    if ($changes -ne $null)
 	    {
-	        foreach ($s in $changes.items.series)
-	        {
-	            if (Test-Path "$data_loc\EpInfo\$s.xml")
-	            {
-	                Write-VerboseAndLog "... series $s has been changed"
-	                Remove-Item "$data_loc\EpInfo\$s.xml"
-	            }
-	        }
+			if (NodeExists $changes.items "series")
+			{
+		        foreach ($s in $changes.items.series)
+		        {
+		            if (Test-Path "$data_loc\EpInfo\$s.xml")
+		            {
+		                Write-VerboseAndLog "... series $s has been changed"
+		                Remove-Item "$data_loc\EpInfo\$s.xml"
+		            }
+		        }
+			}
+            else
+            {
+                Write-Host "No series updates"
+            }
 	    }
 	}
 }
@@ -754,6 +798,24 @@ function LoadConfigFile()
    }
 }
 
+function GetDefaultLanguage()
+{
+	# The default language is "en" (English) - we'll use this if nothing else is specified.
+	$result = "en"
+
+	try {
+		# Only override the default value if a value has actually been provided!
+		if ($my_config.config.default_language -ne "")
+			{ $result = $my_config.config.default_language }
+	}
+   
+	catch {
+		Write-Verbose "... error while retrieving default_language element: $($_.Exception.Message)"
+	}  
+   
+	Write-Output $result
+}
+
 function GetXMLCachePath()
 {
    # Define the default result
@@ -767,7 +829,7 @@ function GetXMLCachePath()
    }
    
    catch {
-      Write-Verbose "... error while retrieving xml_cache elements: $($_.Exception.Message)"
+      Write-Verbose "... error while retrieving xml_cache element: $($_.Exception.Message)"
    }  
    
    Write-Output $result
@@ -883,6 +945,24 @@ function GetSeasonNumberFormat()
    
    catch {
       Write-Verbose "... error while retrieving season_number_format element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetEpisodeNameFormat()
+{
+   # Define the default result
+   $result = "{0} - S{1}E{2} - {3}"
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.episode_name_format -ne "")
+         { $result = $my_config.config.episode_name_format }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving episode_name_format element: $($_.Exception.Message)"
    }
    
    Write-Output $result
@@ -1097,6 +1177,25 @@ function GetMoveDuplicateEpisodes()
    Write-Output $result
 }
 
+function GetMoveIgnoredSeries()
+{
+   # Define the default result
+   # By default, we will NOT move ignored recordings
+   $result = $null
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.move_ignored_series -ne "")
+         { $result = $my_config.config.move_ignored_series }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving move_ignored_series element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
 ##########################################################################
 ###
 ### MAIN CODE STARTS HERE
@@ -1104,6 +1203,7 @@ function GetMoveDuplicateEpisodes()
 ##########################################################################
 
 $my_config = LoadConfigFile
+$default_language = GetDefaultLanguage
 $data_loc = GetXMLCachePath
 $recordings = GetRecordingsPath
 $accept_single_bme = GetAcceptSingleBME
@@ -1111,6 +1211,7 @@ $move_to = GetMoveTo
 $move_to_single_folder = GetMoveToSingleFolder
 $season_folder_name = GetSeasonFolderName
 $season_number_format = GetSeasonNumberFormat
+$epnameformat = GetEpisodeNameFormat
 $create_series_folder_if_missing = GetCreateSeriesFolderIfMissing
 $delete_if_dest_exists = GetDeleteIfDestExists
 $min_age = GetMinAge
@@ -1122,6 +1223,7 @@ $create_processing_logs = GetCreateProcessingLogs
 $move_unmatched_series = GetMoveUnmatchedSeries
 $move_unmatched_episodes = GetMoveUnmatchedEpisodes
 $move_duplicate_episodes = GetMoveDuplicateEpisodes
+$move_ignored_series = GetMoveIgnoredSeries
 
 if (($ignore_series -ne $null) -and ($only_series -ne $null))
 {
@@ -1230,10 +1332,28 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	    }
 		else
 		{
-			if ((SeriesIsInIgnoreList $series_ID) -eq $true -or (SeriesIsNotInOnlyList $series_ID) -eq $true)
+			if ((SeriesIsInIgnoreList $series_ID[0]) -eq $true -or (SeriesIsNotInOnlyList $series_ID[0]) -eq $true)
 			{
-				# If we are ignoring this series, or we have an "only" list and it isn't on it
-				# reset the series_ID to null so that we don't do anything else with this recording
+                # We are either ignoring this series, or the series isn't on our "only" list ... which sort of means
+                # we are also ignoring it!
+                #
+                # So, if configured to move ignored episodes, move this one ...
+                if ($move_ignored_series)
+                {
+                    Write-HostAndLog "... moving to $move_ignored_series\$_"
+	                Move-Item "$recordings\$_" "$move_ignored_series\$_" -ErrorAction "SilentlyContinue"
+	                if ($?)
+	                {
+	                      # If we didn't get an error, write the reverse command out to an undo log file
+		                  if ($create_undo_logs)
+				            { "Move-Item ""$move_ignored_series\$_"" ""$recordings\$_""" >> $undo_log }
+	                }
+	                else
+	                {
+	                   Write-HostAndLog "... error during move: $($error[0])"
+	                }
+                }                
+                # Then reset the series ID to null so that we don't do anything else with this recording
 				$series_ID = $null
 			}
 		}
@@ -1457,7 +1577,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	              	# Retrieve the TvDB version of the episode name
 	              	$episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $this_episode }
 	              	# Build the name we are going to rename to
-	              	$new_name = "$($episodes.Data.Series.SeriesName) - S$($this_season.ToString("0#"))E$($this_episode.ToString("0#")) - $($episode_data.EpisodeName).wtv"
+	              	$new_name = "$epnameformat.wtv" -f $($episodes.Data.Series.SeriesName), $($this_season.ToString("0#")), $($this_episode.ToString("0#")), $($episode_data.EpisodeName)
 	              	# Now perform any required character remapping
 	              	Write-VerboseAndLog "... got interim name of $new_name"
 	              	$new_name = RemapFilename $new_name
