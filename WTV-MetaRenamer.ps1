@@ -41,6 +41,8 @@
 # 0.09     Added support for non-English languages.
 #          Added configuration item to support different formats of renaming.
 #          Added configuration item to move ignored programmes to a folder.
+# 0.10     Changed calls to GetDetailsOf to use a function instead so that the textual name of the attribute can be used
+#          instead of a fixed index number. Win7 SP1 changed the index numbers!
 #
 # Original author: Philip Colmer
 
@@ -770,6 +772,23 @@ function SeriesIsNotInOnlyList($series_ID)
 	return $result
 }
 
+function GetFileAttribute($folder, $file, $attr_name)
+{
+    Write-VerboseAndLog "GetFileAttribute $attr_name"
+    foreach ($index in 0..300)
+    {
+        if ($($folder.GetDetailsOf($null, $index)) -eq $attr_name)
+        {
+            Write-VerboseAndLog "... found at index $index"
+            Write-VerboseAndLog "... returning $($folder.GetDetailsOf($file, $index))"
+            return $($folder.GetDetailsOf($file, $index))
+        }
+    }
+
+    Write-HostAndLog "... cannot match $attr_name as an attribute for $file"
+    break
+}
+
 ######
 ###
 ### Functions to read from the XML config file.
@@ -1279,14 +1298,14 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 
     $combined_title_and_episode = $false
 
-    $this_title = $($folder.GetDetailsOf($file, 21))
+    $this_title = GetFileAttribute $folder $file "Title"  # $($folder.GetDetailsOf($file, 21))
     Write-VerboseAndLog "... title is '$this_title'"
     
     # Before we do ANYTHING else, let's see if the file is old enough.
 	$old_enough = $true
     if ($min_age -ne $null)
     {
-        $date_created = $($folder.GetDetailsOf($file, 4))
+        $date_created = GetFileAttribute $folder $file "Date created" # $($folder.GetDetailsOf($file, 4))
         # This is a string so we need to convert it into a date/time value
         $date_created = [datetime]::ParseExact($date_created, "g", $null)
 		Write-VerboseAndLog "... got creation date of $date_created"
@@ -1368,7 +1387,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 			if ($episodes -ne $null)
 	        {
 	            # Start with the simplest approach - the subtitle entry.
-	            $subtitle = $($folder.GetDetailsOf($file, 195))
+	            $subtitle = GetFileAttribute $folder $file "Subtitle" # $($folder.GetDetailsOf($file, 195))
 	            if ($subtitle -ne "")
 	        	{
 	            	Write-VerboseAndLog "... testing against the subtitle metadata"
@@ -1386,7 +1405,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	{
 	            	# OK - subtitle entry doesn't work. Another common approach is for the
 	            	# description to start with the episode name and be terminated by a colon and a space.
-	            	$try_this = $folder.GetDetailsOf($file, 258)
+	            	$try_this = GetFileAttribute $folder $file "Program description" # $folder.GetDetailsOf($file, 258)
 	            	$try_this = [regex]::split($try_this, ': ')[0]
 
 	              	Write-VerboseAndLog "... testing against the description and colon delimiter"
@@ -1423,7 +1442,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	if ($this_episode -eq 0)
 	           	{
 	              	# Look for a title embedded in the description but ending with a full-stop instead of a colon.
-	              	$try_this = $folder.GetDetailsOf($file, 258)
+	              	$try_this = GetFileAttribute $folder $file "Program description" # $folder.GetDetailsOf($file, 258)
 	            	$try_this = [regex]::split($try_this, '\. ')[0]
 
 	              	Write-VerboseAndLog "... testing against the description and full-stop delimiter"
@@ -1441,7 +1460,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	{
 	              	# The BBC sometimes put the title in the description, but prefix it with <episode number>/<episodes in series>.
 	              	# Look to see if that pattern has been followed.
-	              	$try_this = $folder.GetDetailsOf($file, 258)
+	              	$try_this = GetFileAttribute $folder $file "Program description" # $folder.GetDetailsOf($file, 258)
 	              	$split_at = $try_this.IndexOf(". ")
 	              	if ($split_at -ne -1)
 	              	{
