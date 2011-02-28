@@ -43,6 +43,8 @@
 #          Added configuration item to move ignored programmes to a folder.
 # 0.10     Changed calls to GetDetailsOf to use a function instead so that the textual name of the attribute can be used
 #          instead of a fixed index number. Win7 SP1 changed the index numbers!
+#          Strange workaround required in GetSeriesID where we now seem to have to force a ToString conversion on a value
+#          that is already a string!
 #
 # Original author: Philip Colmer
 
@@ -544,12 +546,15 @@ function FetchSeriesID($series_name)
 		if ($count -eq 1)
 		{
 			Write-VerboseAndLog "... FetchSeriesID has retrieved one match from TvDB"
+            Write-VerboseAndLog "... cloning XML entry for '$series_name'"
 			# Add the series information automatically to the list file
 			$series_xml = @($series_list.Data.Series)[0]
 			$new_series_xml = $series_xml.Clone()
 			$new_series_xml.seriesid = $series_info.Data.Series.seriesid
 			# Changed to save *broadcaster's* series name, not TvDB's
-			$new_series_xml.SeriesName = $series_name # $series_info.Data.Series.SeriesName
+            # Not sure what has broken PowerShell here but we seem to have to force a conversion
+            # of a string to a string!
+			$new_series_xml.SeriesName = $series_name.ToString() # $series_info.Data.Series.SeriesName
 			$rubbish_output = $series_list.Data.AppendChild($new_series_xml)
 			$series_list.Save("$data_loc\SeriesList.xml")
 
