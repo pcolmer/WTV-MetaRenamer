@@ -45,6 +45,7 @@
 #          instead of a fixed index number. Win7 SP1 changed the index numbers!
 #          Strange workaround required in GetSeriesID where we now seem to have to force a ToString conversion on a value
 #          that is already a string!
+# 0.11     Added extra calls to ToString in GetSeriesID (overlooked in v0.10).
 #
 # Original author: Philip Colmer
 
@@ -531,7 +532,7 @@ function FetchSeriesID($series_name)
 					$new_series_xml = $series_xml.Clone()
 					$new_series_xml.seriesid = $this_series.seriesid
 					# Changed to save *broadcaster's* series name, not TvDB's
-					$new_series_xml.SeriesName = $series_name # $this_series.SeriesName
+					$new_series_xml.SeriesName = $series_name.ToString() # $this_series.SeriesName
 					$rubbish_output = $series_list.Data.AppendChild($new_series_xml)
 					$series_list.Save("$data_loc\SeriesList.xml")
 
@@ -614,7 +615,7 @@ function FetchSeriesID($series_name)
 	                        $series_xml = @($series_list.Data.Series)[0]
 	                        $new_series_xml = $series_xml.Clone()
 	                        $new_series_xml.seriesid = $this_series.seriesid
-	                        $new_series_xml.SeriesName = $series_name
+	                        $new_series_xml.SeriesName = $series_name.ToString()
 	                        $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
 	                        $series_list.Save("$data_loc\SeriesList.xml")
 
