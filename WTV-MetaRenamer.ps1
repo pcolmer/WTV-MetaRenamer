@@ -46,6 +46,10 @@
 #          Strange workaround required in GetSeriesID where we now seem to have to force a ToString conversion on a value
 #          that is already a string!
 # 0.11     Added extra calls to ToString in GetSeriesID (overlooked in v0.10).
+# 0.12     Added attributes to config file so that file attribute names can be changed from English easily if required.
+#          Now look up attribute indexes once when script runs instead of calling the function introduced in 0.10.
+#          Now remap the series name when using it for folder names
+#          Added functionality to optionally convert to DVR-MS as part of the renaming process
 #
 # Original author: Philip Colmer
 
@@ -53,7 +57,7 @@ param([string]$configurationfile, [switch]$interactive)
 
 $VerbosePreference = "SilentlyContinue"
 Set-StrictMode –version Latest
-
+$version = "0.12"
 $i_am_here = $(Get-Location -PSProvider FileSystem)
 
 # Uses DotNetZip library from CodePlex in order to unpack the series Zip files.
@@ -778,22 +782,23 @@ function SeriesIsNotInOnlyList($series_ID)
 	return $result
 }
 
-function GetFileAttribute($folder, $file, $attr_name)
-{
-    Write-VerboseAndLog "GetFileAttribute $attr_name"
-    foreach ($index in 0..300)
-    {
-        if ($($folder.GetDetailsOf($null, $index)) -eq $attr_name)
-        {
-            Write-VerboseAndLog "... found at index $index"
-            Write-VerboseAndLog "... returning $($folder.GetDetailsOf($file, $index))"
-            return $($folder.GetDetailsOf($file, $index))
-        }
-    }
-
-    Write-HostAndLog "... cannot match $attr_name as an attribute for $file"
-    break
-}
+# No longer needed as of v0.12. Do the lookup once and store in variables
+#function GetFileAttribute($folder, $file, $attr_name)
+#{
+#    Write-VerboseAndLog "GetFileAttribute $attr_name"
+#    foreach ($index in 0..300)
+#    {
+#        if ($($folder.GetDetailsOf($null, $index)) -eq $attr_name)
+#        {
+#            Write-VerboseAndLog "... found at index $index"
+#            Write-VerboseAndLog "... returning $($folder.GetDetailsOf($file, $index))"
+#            return $($folder.GetDetailsOf($file, $index))
+#        }
+#    }
+#
+#    Write-HostAndLog "... cannot match $attr_name as an attribute for $file"
+#    break
+#}
 
 ######
 ###
@@ -1221,6 +1226,135 @@ function GetMoveIgnoredSeries()
    Write-Output $result
 }
 
+function GetAttributeTitle()
+{
+   # Define the default result
+   $result = "Title"
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.attribute_title -ne "")
+         { $result = $my_config.config.attribute_title }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving attribute_title element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetAttributeDateCreated()
+{
+   # Define the default result
+   $result = "Date Created"
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.attribute_date_created -ne "")
+         { $result = $my_config.config.attribute_date_created }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving attribute_date_created element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetAttributeSubtitle()
+{
+   # Define the default result
+   $result = "Subtitle"
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.attribute_subtitle -ne "")
+         { $result = $my_config.config.attribute_subtitle }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving attribute_subtitle element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetAttributeProgramDescription()
+{
+   # Define the default result
+   $result = "Program Description"
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.attribute_program_description -ne "")
+         { $result = $my_config.config.attribute_program_description }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving attribute_program_description element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetConvertToDVRMS
+{
+   # Define the default result
+   # Default to $false - we don't convert WTV files to DVRMS format
+   $result = $false
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.convert_to_dvrms -ne "")
+         { $result = SafeBooleanConvert $my_config.config.convert_to_dvrms }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving convert_to_dvrms element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetDeleteWTVAfterConversion
+{
+   # Define the default result
+   # Default to $false - we don't delete the WTV file after converting it
+   $result = $false
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.delete_wtv_after_conversion -ne "")
+         { $result = SafeBooleanConvert $my_config.config.delete_wtv_after_conversion }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving delete_wtv_after_conversion element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetMoveWTVAfterConversion
+{
+   # Define the default result
+   # By default, we will NOT move WTV files after converting them to DVRMS
+   $result = $null
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.move_wtv_after_conversion -ne "")
+         { $result = $my_config.config.move_wtv_after_conversion }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving move_unmatched_episodes element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
 ##########################################################################
 ###
 ### MAIN CODE STARTS HERE
@@ -1249,6 +1383,13 @@ $move_unmatched_series = GetMoveUnmatchedSeries
 $move_unmatched_episodes = GetMoveUnmatchedEpisodes
 $move_duplicate_episodes = GetMoveDuplicateEpisodes
 $move_ignored_series = GetMoveIgnoredSeries
+$attribute_title = GetAttributeTitle
+$attribute_date_created = GetAttributeDateCreated
+$attribute_subtitle = GetAttributeSubtitle
+$attribute_program_description = GetAttributeProgramDescription
+$convert_to_dvrms = GetConvertToDVRMS
+$delete_wtv_after_conversion = GetDeleteWTVAfterConversion
+$move_wtv_after_conversion = GetMoveWTVAfterConversion
 
 if (($ignore_series -ne $null) -and ($only_series -ne $null))
 {
@@ -1267,6 +1408,52 @@ if ($create_processing_logs)
 	$processing_log = "$recordings\Log_$($the_time_is_now).txt"
 	Write-Host "Processing log is called '$processing_log'"
 }
+
+Write-HostAndLog "WTV-MetaRenamer v$version"
+
+$shell = New-Object -ComObject "Shell.Application"
+$folder = $shell.NameSpace($recordings)
+
+$index_title = -1
+$index_date_created = -1
+$index_subtitle = -1
+$index_program_description = -1
+
+foreach ($index in 0..300)
+{
+    if ($($folder.GetDetailsOf($null, $index)) -eq $attribute_title)
+    {
+        Write-VerboseAndLog "... found '$attribute_title' at index $index"
+        $index_title = $index
+    }
+    if ($($folder.GetDetailsOf($null, $index)) -eq $attribute_date_created)
+    {
+        Write-VerboseAndLog "... found '$attribute_date_created' at index $index"
+        $index_date_created = $index
+    }
+    if ($($folder.GetDetailsOf($null, $index)) -eq $attribute_subtitle)
+    {
+        Write-VerboseAndLog "... found '$attribute_subtitle' at index $index"
+        $index_subtitle = $index
+    }
+    if ($($folder.GetDetailsOf($null, $index)) -eq $attribute_program_description)
+    {
+        Write-VerboseAndLog "... found '$attribute_program_description' at index $index"
+        $index_program_description = $index
+    }
+}
+
+if ($index_title -eq -1)
+    { Write-HostAndLog "... failed to find attribute '$attribute_title'" }
+if ($index_date_created -eq -1)
+    { Write-HostAndLog "... failed to find attribute '$attribute_date_created'" }
+if ($index_subtitle -eq -1)
+    { Write-HostAndLog "... failed to find attribute '$attribute_subtitle'" }
+if ($index_program_description -eq -1)
+    { Write-HostAndLog "... failed to find attribute '$attribute_program_description'" }
+
+if (($index_title -eq -1) -or ($index_date_created -eq -1) -or ($index_subtitle -eq -1) -or ($index_program_description -eq -1))
+    { break }
 
 if (($move_to_single_folder -eq $true) -and ($move_to -is [Array]) -and ($move_to.count -ne 1))
 {
@@ -1288,30 +1475,20 @@ if ($min_age -ne $null)
 }
 
 # Now scan through all of the recordings and process
-$shell = New-Object -ComObject "Shell.Application"
-$folder = $shell.NameSpace($recordings)
 Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	Write-HostAndLog "Processing $_"
     $file = $folder.ParseName($_.Name)
 
-    # 0..300 | foreach { "$_ $($folder.GetDetailsOf($null, $_)) ... $($folder.GetDetailsOf($file, $_))" }
-    # break
-
-    # Entry 4 is the date created (used for min age tests)
-    # Entry 21 is the title i.e. the series name
-    # Entry 195 is the subtitle, which is typically the episode title
-    # Entry 258 is the programme description
-
     $combined_title_and_episode = $false
 
-    $this_title = GetFileAttribute $folder $file "Title"  # $($folder.GetDetailsOf($file, 21))
+    $this_title = $($folder.GetDetailsOf($file, $index_title)) # GetFileAttribute $folder $file "Title"
     Write-VerboseAndLog "... title is '$this_title'"
     
     # Before we do ANYTHING else, let's see if the file is old enough.
 	$old_enough = $true
     if ($min_age -ne $null)
     {
-        $date_created = GetFileAttribute $folder $file "Date created" # $($folder.GetDetailsOf($file, 4))
+        $date_created = $($folder.GetDetailsOf($file, $index_date_created)) # GetFileAttribute $folder $file "Date created"
         # This is a string so we need to convert it into a date/time value
         $date_created = [datetime]::ParseExact($date_created, "g", $null)
 		Write-VerboseAndLog "... got creation date of $date_created"
@@ -1393,7 +1570,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 			if ($episodes -ne $null)
 	        {
 	            # Start with the simplest approach - the subtitle entry.
-	            $subtitle = GetFileAttribute $folder $file "Subtitle" # $($folder.GetDetailsOf($file, 195))
+	            $subtitle = $($folder.GetDetailsOf($file, $index_subtitle)) # GetFileAttribute $folder $file "Subtitle"
 	            if ($subtitle -ne "")
 	        	{
 	            	Write-VerboseAndLog "... testing against the subtitle metadata"
@@ -1411,7 +1588,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	{
 	            	# OK - subtitle entry doesn't work. Another common approach is for the
 	            	# description to start with the episode name and be terminated by a colon and a space.
-	            	$try_this = GetFileAttribute $folder $file "Program description" # $folder.GetDetailsOf($file, 258)
+	            	$try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
 	            	$try_this = [regex]::split($try_this, ': ')[0]
 
 	              	Write-VerboseAndLog "... testing against the description and colon delimiter"
@@ -1448,7 +1625,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	if ($this_episode -eq 0)
 	           	{
 	              	# Look for a title embedded in the description but ending with a full-stop instead of a colon.
-	              	$try_this = GetFileAttribute $folder $file "Program description" # $folder.GetDetailsOf($file, 258)
+	              	$try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
 	            	$try_this = [regex]::split($try_this, '\. ')[0]
 
 	              	Write-VerboseAndLog "... testing against the description and full-stop delimiter"
@@ -1466,7 +1643,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	           	{
 	              	# The BBC sometimes put the title in the description, but prefix it with <episode number>/<episodes in series>.
 	              	# Look to see if that pattern has been followed.
-	              	$try_this = GetFileAttribute $folder $file "Program description" # $folder.GetDetailsOf($file, 258)
+	              	$try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
 	              	$split_at = $try_this.IndexOf(". ")
 	              	if ($split_at -ne -1)
 	              	{
@@ -1602,10 +1779,14 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	              	# Retrieve the TvDB version of the episode name
 	              	$episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $this_episode }
 	              	# Build the name we are going to rename to
+                    # v0.12 - define $new_wild to allow us to perform a wildcard Test-Path call to see if the file exists in any format. Note that we do NOT
+                    #         put .* at the end of the name as this allows us to check for explicit extensions later on if required
 	              	$new_name = "$epnameformat.wtv" -f $($episodes.Data.Series.SeriesName), $($this_season.ToString("0#")), $($this_episode.ToString("0#")), $($episode_data.EpisodeName)
+                    $new_wild = "$epnameformat" -f $($episodes.Data.Series.SeriesName), $($this_season.ToString("0#")), $($this_episode.ToString("0#")), $($episode_data.EpisodeName)
 	              	# Now perform any required character remapping
 	              	Write-VerboseAndLog "... got interim name of $new_name"
 	              	$new_name = RemapFilename $new_name
+                    $new_wild = RemapFilename $new_wild
 	              	Write-VerboseAndLog "... remapped name is $new_name"
 	            
 	              	# Rename or move?
@@ -1625,15 +1806,17 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 					  	}
 					  	else
 					  	{
+                            # v0.12 - remap the series name
+                            $sn = RemapFilename $($episodes.Data.Series.SeriesName)
 						  	# let's see if we can find a folder with the series name
 		                  	$series_path = $null
 	                      	foreach ($path in $move_to)
 		                  	{
-		                     	Write-VerboseAndLog "... checking $path\$($episodes.Data.Series.SeriesName)"
-		                     	if (Test-Path "$path\$($episodes.Data.Series.SeriesName)")
+		                     	Write-VerboseAndLog "... checking $path\$sn"
+		                     	if (Test-Path "$path\$sn")
 		                     	{
 		                        	Write-VerboseAndLog "... found series under path $path"
-		                        	$series_path = "$path\$($episodes.Data.Series.SeriesName)"
+		                        	$series_path = "$path\$sn"
 		                     	}
 		                  	}
 		                
@@ -1645,11 +1828,11 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 		                      	{
 	                             	if ($move_to -is [Array])
 	                             	{
-		                             	$series_path = "$($move_to[0])\$($episodes.Data.Series.SeriesName)"
+		                             	$series_path = "$($move_to[0])\$sn"
 	                             	}
 	                             	else
 	                             	{
-		                             	$series_path = "$($move_to)\$($episodes.Data.Series.SeriesName)"
+		                             	$series_path = "$($move_to)\$sn"
 	                             	}
 		                         	Write-VerboseAndLog "... creating series folder in $series_path"
 		                         	New-Item $series_path -type directory > $null
@@ -1685,20 +1868,61 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                  	else
 	                  	{
 	                      	# See if the file already exists there
-	                      	if (!(Test-Path "$dest_folder\$new_name"))
+                            # v0.12 - use $new_wild instead of $new_name
+	                      	if (!(Test-Path "$dest_folder\$new_wild.*"))
 	                      	{
-	                          	Write-HostAndLog "... moving to '$dest_folder\$new_name'"
-	                          	Move-Item "$recordings\$_" "$dest_folder\$new_name" -ErrorAction "SilentlyContinue"
-	                          	if ($?)
-	                          	{
-	                              	# If we didn't get an error, write the reverse command out to an undo log file
-									if ($create_undo_logs)
-										{ "Move-Item ""$dest_folder\$new_name"" ""$recordings\$_""" >> $undo_log }
-	                          	}
-	                          	else
-	                          	{
-	                              	Write-HostAndLog "... error during move: $($error[0])"
-	                          	}
+                                if ($convert_to_dvrms)
+                                {
+                                    # Call WTVConverter to convert the WTV file to DVRMS
+    	                          	Write-HostAndLog "... converting to '$dest_folder\$new_wild.dvr-ms'"
+                                    .$env:systemroot\ehome\wtvconverter "$recordings\$_" "$dest_folder\$new_wild.dvr-ms" /ShowUI | out-null
+                                    if ($?)
+                                    {
+                                        # If we didn't get an error, log the fact that we did the conversion and
+                                        # finish off the handling
+                                        if ($create_undo_logs)
+                                            { "# Converted ""$recordings\$_"" to ""$dest_folder\$new_wild.dvr-ms""" >> $undo_log }
+                                        if ($delete_wtv_after_conversion)
+                                        {
+	                              	        Write-HostAndLog "... deleting WTV file after converting to DVR-MS"
+	                              	        Remove-Item "$recordings\$_"
+                                        }
+                                        elseif ($move_wtv_after_conversion)
+                                        {
+                                            Write-HostAndLog "... converted to DVR-MS, moving to $move_wtv_after_conversion\$_"
+	                          	            Move-Item "$recordings\$_" "$move_wtv_after_conversion\$_" -ErrorAction "SilentlyContinue"
+	                          	            if ($?)
+	                          	            {
+	                              	            # If we didn't get an error, write the reverse command out to an undo log file
+									            if ($create_undo_logs)
+									    	        { "Move-Item ""$move_wtv_after_conversion\$_"" ""$recordings\$_""" >> $undo_log }
+	                          	            }
+	                          	            else
+	                          	            {
+	                              	            Write-HostAndLog "... error during move after conversion: $($error[0])"
+	                          	            }
+                                        }
+                                    }
+                                    else
+                                    {
+	                              	    Write-HostAndLog "... error during conversion to DVR-MS: $($error[0])"
+                                    }
+                                }
+                                else
+                                {
+    	                          	Write-HostAndLog "... moving to '$dest_folder\$new_name'"
+	                          	    Move-Item "$recordings\$_" "$dest_folder\$new_name" -ErrorAction "SilentlyContinue"
+	                          	    if ($?)
+	                          	    {
+	                              	    # If we didn't get an error, write the reverse command out to an undo log file
+									    if ($create_undo_logs)
+										    { "Move-Item ""$dest_folder\$new_name"" ""$recordings\$_""" >> $undo_log }
+	                          	    }
+	                          	    else
+	                          	    {
+	                              	    Write-HostAndLog "... error during move: $($error[0])"
+	                          	    }
+                                }
 	                      	}
 	                      	else
 	                      	{
@@ -1732,20 +1956,61 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	              	else
 	              	{
 	                 	# Rename - does a file of this name already exist?
-	                 	if (!(Test-Path "$recordings\$new_name"))
+                        # v0.12 - use $new_wild instead of $new_name to check for any extension
+	                 	if (!(Test-Path "$recordings\$new_wild.*"))
 	                 	{
-	                     	Write-HostAndLog "... renaming to '$new_name'"
-	                     	Rename-Item "$recordings\$_" "$new_name" -ErrorAction "SilentlyContinue"
-	                     	if ($?)
-	                     	{
-	                         	# If we didn't get an error, write the reverse command out to an undo log file
-								if ($create_undo_logs)
-									{ "Rename-Item ""$recordings\$new_name"" ""$_""" >> $undo_log }
-	                     	}
-	                     	else
-	                     	{
-	                         	Write-HostAndLog "... error during rename: $($error[0])"
-	                     	}
+                            if ($convert_to_dvrms)
+                            {
+                                # Call WTVConverter to convert the WTV file to DVRMS. Pipe to out-null to force PowerShell to wait
+    	                      	Write-HostAndLog "... converting to '$new_wild.dvr-ms'"
+                                .$env:systemroot\ehome\wtvconverter "$recordings\$_" "$recordings\$new_wild.dvr-ms" /ShowUI | out-null
+                                if ($?)
+                                {
+                                    # If we didn't get an error, log the fact that we did the conversion and
+                                    # finish off the handling
+                                    if ($create_undo_logs)
+                                        { "# Converted ""$recordings\$_"" to ""$recordings\$new_wild.dvr-ms""" >> $undo_log }
+                                    if ($delete_wtv_after_conversion)
+                                    {
+	                          	        Write-HostAndLog "... deleting WTV file after converting to DVR-MS"
+	                          	        Remove-Item "$recordings\$_"
+                                    }
+                                    elseif ($move_wtv_after_conversion)
+                                    {
+                                        Write-HostAndLog "... converted to DVR-MS, moving to $move_wtv_after_conversion\$_"
+	                                    Move-Item "$recordings\$_" "$move_wtv_after_conversion\$_" -ErrorAction "SilentlyContinue"
+	                                    if ($?)
+	                                    {
+	                          	            # If we didn't get an error, write the reverse command out to an undo log file
+							                if ($create_undo_logs)
+							        	        { "Move-Item ""$move_wtv_after_conversion\$_"" ""$recordings\$_""" >> $undo_log }
+	                                    }
+	                                    else
+	                                    {
+	                           	            Write-HostAndLog "... error during move after conversion: $($error[0])"
+	                                    }
+                                    }
+                                }
+                                else
+                                {
+	                                Write-HostAndLog "... error during conversion to DVR-MS: $($error[0])"
+                                }
+                            }
+                            else
+                            {
+	                     	    Write-HostAndLog "... renaming to '$new_name'"
+	                     	    Rename-Item "$recordings\$_" "$new_name" -ErrorAction "SilentlyContinue"
+	                     	    if ($?)
+	                     	    {
+	                         	    # If we didn't get an error, write the reverse command out to an undo log file
+								    if ($create_undo_logs)
+									    { "Rename-Item ""$recordings\$new_name"" ""$_""" >> $undo_log }
+	                     	    }
+	                     	    else
+	                         	{
+	                         	    Write-HostAndLog "... error during rename: $($error[0])"
+	                     	    }
+                            }
 	                 	}
 	                 	else
 	                 	{
