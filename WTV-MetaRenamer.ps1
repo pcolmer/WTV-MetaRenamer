@@ -1528,7 +1528,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	            }
 	            else
 	            {
-	            	Write-HostAndLog "... error during move: $($error[0])"
+	            	Write-HostAndLog "... error during 'unmatched series' move: $($error[0])"
 	            }
 			}
 	    }
@@ -1552,7 +1552,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                }
 	                else
 	                {
-	                   Write-HostAndLog "... error during move: $($error[0])"
+	                   Write-HostAndLog "... error during 'ignored series' move: $($error[0])"
 	                }
                 }                
                 # Then reset the series ID to null so that we don't do anything else with this recording
@@ -1920,12 +1920,13 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                          	    }
 	                          	    else
 	                          	    {
-	                              	    Write-HostAndLog "... error during move: $($error[0])"
+	                              	    Write-HostAndLog "... error during move to destination folder: $($error[0])"
 	                          	    }
                                 }
 	                      	}
 	                      	else
 	                      	{
+                                # The destination file exists already - what do the configuration options tell us to do next?
 	                          	if ($delete_if_dest_exists)
 	                          	{
 	                              	Write-HostAndLog "... file of that name already exists, deleting this one"
@@ -1943,7 +1944,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                          	    }
 	                          	    else
 	                          	    {
-	                              	    Write-HostAndLog "... error during move: $($error[0])"
+	                              	    Write-HostAndLog "... error during 'duplicate episodes' move: $($error[0])"
 	                          	    }
                                 }
                                 else
@@ -2014,6 +2015,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                 	}
 	                 	else
 	                 	{
+                            # The destination file exists already - what do the configuration options tell us to do next?
 	                     	if ($delete_if_dest_exists)
 	                     	{
 	                         	Write-HostAndLog "... file of that name already exists, deleting this one"
@@ -2031,7 +2033,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                          	}
 	                          	else
 	                          	{
-	                                Write-HostAndLog "... error during move: $($error[0])"
+	                                Write-HostAndLog "... error during 'duplicate episodes' move: $($error[0])"
 	                          	}
                             }
 	                     	else
