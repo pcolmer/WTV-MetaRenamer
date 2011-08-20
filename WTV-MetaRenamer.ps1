@@ -50,19 +50,28 @@
 #          Now look up attribute indexes once when script runs instead of calling the function introduced in 0.10.
 #          Now remap the series name when using it for folder names
 #          Added functionality to optionally convert to DVR-MS as part of the renaming process
+# 0.13     Added airdate to output of episode titles if not possible to match (Work item 1169)
+#          Added commandline support for -whatif and -verbose
+#          Added new parameters to config file to specify names of attributes for Recording time and Broadcast date
+#          Added capability, on a per series basis, to use the broadcast date or recording date as a match
 #
 # Original author: Philip Colmer
 
-param([string]$configurationfile, [switch]$interactive)
+param([string]$configurationfile, [switch]$interactive, [switch]$whatif, [switch]$verbose)
 
-$VerbosePreference = "SilentlyContinue"
+if ($verbose.IsPresent)
+  { $VerbosePreference = "Continue" }
+else
+  { $VerbosePreference = "SilentlyContinue" }
+
+if ($whatif.IsPresent)
+  { $WhatIfPreference = $true }
+else
+  { $WhatIfPreference = $false }
+  
 Set-StrictMode –version Latest
-$version = "0.12"
+$version = "0.13"
 $i_am_here = $(Get-Location -PSProvider FileSystem)
-
-# Uses DotNetZip library from CodePlex in order to unpack the series Zip files.
-# The DLL is expected to be located in the same folder as this PowerShell script.
-Add-Type -Path "$i_am_here\Ionic.Zip.dll"
 
 function get-ld
 {
@@ -311,13 +320,61 @@ function GetInputFromUser($upper)
     return $answer
 }
 
+function MatchEpisodeByDate($date)
+{
+   # Looks through the XML data that has been preloaded into $episodes
+   # to see if there is an episode that has a matching date
+   # Either returns the season and episode numbers if a match found, or -1 if more
+   # than one match found, or 0 if no match found.
+   # The XML has the dates in the format yyyy-mm-dd so let's build a string to search for
+   $m = $([int]$date.month).ToString("0#")
+   $d = $([int]$date.day).ToString("0#")
+   $search = "$($date.year)-$m-$d"
+   Write-VerboseAndLog "... MatchEpisodeByDate: trying to find an episode with a date of '$search'"
+   $match = $episodes.Data.Episode | Where-Object { $_.FirstAired -eq $search }
+   if ($match -ne $null)
+   {
+      # Matched - but how many times?
+      $count = 0
+      foreach ($ep in $match) { $count++ }
+      if ($count -eq 1)
+      {
+         if ($match.EpisodeNumber -ne 0)
+         {
+            Write-Output ([int]$match.SeasonNumber)
+            Write-Output ([int]$match.EpisodeNumber)
+         }
+         else
+         {
+            # An episode number of 0 isn't valid
+            Write-VerboseAndLog "... matched but invalid episode number"
+            Write-Output ([int]0)
+            Write-Output ([int]0)
+         }
+      }
+      else
+      {
+         Write-VerboseAndLog "... more than 1 match"
+         Write-Output ([int]-1)
+         Write-Output ([int]-1)
+      }
+   }
+   else
+   {
+      # Not matched - return zeroes
+      Write-VerboseAndLog "... didn't match date"
+      Write-Output ([int]0)
+      Write-Output ([int]0)
+   }
+}
+
 function MatchEpisode($text)
 {
    # Looks through the XML data that has been preloaded into $episodes
    # to see if there is an episode that has an episode name matching the passed text
    # Either returns the season and episode numbers if a match found, or -1 if more
    # than one match found, or 0 if no match found.
-   Write-VerboseAndLog "... trying to find an episode that matches '$text'"
+   Write-VerboseAndLog "... MatchEpisode: trying to find an episode that matches '$text'"
    $match = $episodes.Data.Episode | Where-Object { $_.EpisodeName -eq $text }
    if ($match -ne $null)
    {
@@ -341,19 +398,26 @@ function MatchEpisode($text)
       }
       else
       {
+         # This bit of code is used if the function has managed to precisely match
+         # the episode name, but has done so more than once. Rare, but it happens.
+         
          Write-HostAndLog "... matched $count times - unable to safely rename"
          $index = 1
          foreach ($ep in $match)
          {
             $s = $([int]$ep.SeasonNumber).ToString("0#")
             $e = $([int]$ep.EpisodeNumber).ToString("0#")
+            $a = $ep.FirstAired
+            if ($a -ne $null)
+                { $a = "[Original airdate: $a]" }
+                
             if ($interactive)
             {
-                Write-Host "... [$index] S$($s)E$($e) - $($ep.EpisodeName)"
+                Write-Host "... [$index] S$($s)E$($e) - $($ep.EpisodeName) $a"
             }
             else
             {
-                Write-HostAndLog "... S$($s)E$($e) - $($ep.EpisodeName)"
+                Write-HostAndLog "... S$($s)E$($e) - $($ep.EpisodeName) $a"
             }
             $index++
          }
@@ -509,6 +573,28 @@ function FetchSeriesID($series_name)
 			Write-VerboseAndLog "... returning default language code $default_language"
 			Write-Output $default_language
 		}
+        # If this entry in the cache specifies that we can use the broadcast date or the
+        # date of recording, return that otherwise return false.
+        if (NodeExists $this_series "MatchBroadcastDate")
+        {
+			Write-VerboseAndLog "... returning MatchBroadcastDate as $($this_series.MatchBroadcastDate)"
+			Write-Output $this_series.MatchBroadcastDate
+        }
+        else
+        {
+			Write-VerboseAndLog "... returning MatchBroadcastDate as $false"
+            Write-Output $false
+        }
+        if (NodeExists $this_series "MatchRecordingDate")
+        {
+			Write-VerboseAndLog "... returning MatchRecordingDate as $($this_series.MatchRecordingDate)"
+			Write-Output $this_series.MatchRecordingDate
+        }
+        else
+        {
+			Write-VerboseAndLog "... returning MatchBroadcastDate as $false"
+            Write-Output $false
+        }
 		return
 	}
 
@@ -540,9 +626,11 @@ function FetchSeriesID($series_name)
 					$rubbish_output = $series_list.Data.AppendChild($new_series_xml)
 					$series_list.Save("$data_loc\SeriesList.xml")
 
-					Write-VerboseAndLog "... returning $($this_series.seriesid) and language $default_language"
+					Write-VerboseAndLog "... returning $($this_series.seriesid), language $default_language, MatchBroadcastDate = false and MatchRecordingDate = false"
 					Write-Output $this_series.seriesid
 					Write-Output $default_language
+                    Write-Output $false
+                    Write-Output $false
 					return
 				}
 			}
@@ -563,9 +651,11 @@ function FetchSeriesID($series_name)
 			$rubbish_output = $series_list.Data.AppendChild($new_series_xml)
 			$series_list.Save("$data_loc\SeriesList.xml")
 
-			Write-VerboseAndLog "... returning $($series_info.Data.Series.seriesid) and language $default_language"
+			Write-VerboseAndLog "... returning $($series_info.Data.Series.seriesid), language $default_language, MatchBroadcastDate = false and MatchRecordingDate = false"
 			Write-Output $series_info.Data.Series.seriesid
 			Write-Output $default_language
+            Write-Output $false
+            Write-Output $false
 		}
 		else
 		{
@@ -625,6 +715,8 @@ function FetchSeriesID($series_name)
 
 	                        Write-Output $this_series.seriesid
 							Write-Output $default_language
+                            Write-Output $false
+                            Write-Output $false
 	                        return
 	                    }
 	                    $index++
@@ -691,7 +783,10 @@ function CheckForUpdatesSinceLastRun()
 		            if (Test-Path "$data_loc\EpInfo\$s.xml")
 		            {
 		                Write-VerboseAndLog "... series $s has been changed"
-		                Remove-Item "$data_loc\EpInfo\$s.xml"
+                        # Force -whatif to be false because WhatIfPreference (set at the
+                        # top of the script) would otherwise potentially stop this file
+                        # deletion from happening!
+		                Remove-Item "$data_loc\EpInfo\$s.xml" -whatif:$false
 		            }
 		        }
 			}
@@ -1298,6 +1393,42 @@ function GetAttributeProgramDescription()
    Write-Output $result
 }
 
+function GetAttributeRecordingTime()
+{
+   # Define the default result
+   $result = "Recording time"
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.attribute_recording_time -ne "")
+         { $result = $my_config.config.attribute_recording_time }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving attribute_recording_time element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
+function GetAttributeBroadcastDate()
+{
+   # Define the default result
+   $result = "Broadcast date"
+
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.attribute_broadcast_date -ne "")
+         { $result = $my_config.config.attribute_broadcast_date }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving attribute_broadcast_date element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
 function GetConvertToDVRMS
 {
    # Define the default result
@@ -1361,6 +1492,17 @@ function GetMoveWTVAfterConversion
 ###
 ##########################################################################
 
+# Uses DotNetZip library from CodePlex in order to unpack the series Zip files.
+# The DLL is expected to be located in the same folder as this PowerShell script.
+try
+{
+    Add-Type -Path "$i_am_here\Ionic.Zip.dll"
+}
+catch
+{
+    Throw "Cannot continue if Ionic.Zip.dll cannot be found or loaded"
+}
+
 $my_config = LoadConfigFile
 $default_language = GetDefaultLanguage
 $data_loc = GetXMLCachePath
@@ -1387,6 +1529,8 @@ $attribute_title = GetAttributeTitle
 $attribute_date_created = GetAttributeDateCreated
 $attribute_subtitle = GetAttributeSubtitle
 $attribute_program_description = GetAttributeProgramDescription
+$attribute_recording_time = GetAttributeRecordingTime
+$attribute_broadcast_date = GetAttributeBroadcastDate
 $convert_to_dvrms = GetConvertToDVRMS
 $delete_wtv_after_conversion = GetDeleteWTVAfterConversion
 $move_wtv_after_conversion = GetMoveWTVAfterConversion
@@ -1414,10 +1558,13 @@ Write-HostAndLog "WTV-MetaRenamer v$version"
 $shell = New-Object -ComObject "Shell.Application"
 $folder = $shell.NameSpace($recordings)
 
+# Find the attributes we want to look at
 $index_title = -1
 $index_date_created = -1
 $index_subtitle = -1
 $index_program_description = -1
+$index_recording_time = -1
+$index_broadcast_date = -1
 
 foreach ($index in 0..300)
 {
@@ -1440,6 +1587,16 @@ foreach ($index in 0..300)
     {
         Write-VerboseAndLog "... found '$attribute_program_description' at index $index"
         $index_program_description = $index
+    }
+    if ($($folder.GetDetailsOf($null, $index)) -eq $attribute_recording_time)
+    {
+        Write-VerboseAndLog "... found '$attribute_recording_time' at index $index"
+        $index_recording_time = $index
+    }
+    if ($($folder.GetDetailsOf($null, $index)) -eq $attribute_broadcast_date)
+    {
+        Write-VerboseAndLog "... found '$attribute_broadcast_date' at index $index"
+        $index_broadcast_date = $index
     }
 }
 
@@ -1686,6 +1843,47 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                  	}
 	              	}
 	           	}
+                if ($this_episode -eq 0)
+                {
+                    # If the recording has a broadcast date attribute AND the series configuration
+                    # allows us to use the broadcast date, see if we can match.
+                    $date_to_try = $folder.GetDetailsOf($file, $index_broadcast_date)
+                    # Clean up the string (it has weird chars in it!)
+                    $date_to_try = [System.Text.RegularExpressions.Regex]::Replace($date_to_try,"[^0-9/ :]","")
+                    # and convert it into the system's date format
+                    $date_to_try = $date_to_try -as [datetime]
+                    Write-VerboseAndLog "... file has broadcast date of '$date_to_try'"
+                    if ($Series_ID[2] -eq $true -and $date_to_try -ne "" -and $date_to_try -ne $null)
+                    {
+                        Write-Verbose "... looking for broadcast date match"
+                        $result = MatchEpisodeByDate $date_to_try
+	                    $this_season = $result[0]
+	                    $this_episode = $result[1]
+                    }
+                    else
+                      { Write-Verbose "... not looking for broadcast date match" }
+                }
+                if ($this_episode -eq 0)
+                {
+                    # If the series configuration allows us to use the date of recording the programme,
+                    # see if we can match. This should work well if Media Centre is set up to record
+                    # first run programmes and the air dates in TheTVDB match.
+                    $date_to_try = $folder.GetDetailsOf($file, $index_recording_time)
+                    # Clean up the string (it has weird chars in it!)
+                    $date_to_try = [System.Text.RegularExpressions.Regex]::Replace($date_to_try,"[^0-9/ :]","")
+                    # and convert it into the system's date format
+                    $date_to_try = $date_to_try -as [datetime]
+                    Write-VerboseAndLog "... file has recording date of '$date_to_try'"
+                    if ($Series_ID[2] -eq $true -and $date_to_try -ne "" -and $date_to_try -ne $null)
+                    {
+                        Write-Verbose "... looking for recording date match"
+                        $result = MatchEpisodeByDate $date_to_try
+	                    $this_season = $result[0]
+	                    $this_episode = $result[1]
+                    }
+                    else
+                      { Write-Verbose "... not looking for recording date match" }
+                }
 
 	           	# That's all the tests we know to do
 	           
@@ -1730,7 +1928,11 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                          	{
 	                              	$s = $([int]$episode.SeasonNumber).ToString("0#")
 	                              	$e = $([int]$episode.EpisodeNumber).ToString("0#")
-	                              	Write-Host "... [$index] S$($s)E$($e) - $($episode.EpisodeName)"
+                                    $a = $episode.FirstAired
+                                    if ($a -ne $null)
+                                        { $a = "[Original airdate: $a]" }
+
+	                              	Write-Host "... [$index] S$($s)E$($e) - $($episode.EpisodeName) $a"
 	                              	$index++
 	                          	}
 	                      	}
@@ -2069,7 +2271,11 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
 	                      	{
 	                          	$s = $([int]$episode.SeasonNumber).ToString("0#")
 	                          	$e = $([int]$episode.EpisodeNumber).ToString("0#")
-	                          	Write-HostAndLog "... S$($s)E$($e) - $($episode.EpisodeName)"
+                                $a = $episode.FirstAired
+                                if ($a -ne $null)
+                                    { $a = "[Original airdate: $a]" }
+
+	                          	Write-HostAndLog "... S$($s)E$($e) - $($episode.EpisodeName) $a"
 	                      	}
 	                  	}
 	              	}
