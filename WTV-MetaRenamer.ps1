@@ -54,6 +54,8 @@
 #          Added commandline support for -whatif and -verbose
 #          Added new parameters to config file to specify names of attributes for Recording time and Broadcast date
 #          Added capability, on a per series basis, to use the broadcast date or recording date as a match
+# 0.14     Fixed bug that meant the check for recording date was only used if checking for broadcast date
+# 0.15     Added debugging to the episode fetcher to try to troubleshoot a problem
 #
 # Original author: Philip Colmer
 
@@ -70,7 +72,7 @@ else
   { $WhatIfPreference = $false }
   
 Set-StrictMode –version Latest
-$version = "0.13"
+$version = "0.15 (beta)"
 $i_am_here = $(Get-Location -PSProvider FileSystem)
 
 function get-ld
@@ -487,32 +489,42 @@ function FetchEpisodeInfo($series_info)
         }        
         
         $url = "$tvdb_mirror/api/$apikey/series/$this_series_id/all/$this_series_lang.zip"
+        Write-VerboseAndLog "... about to fetch '$url'"
         $req = [System.Net.HttpWebRequest]::Create($url)
         $res = $req.GetResponse()
         if ($res.StatusCode -eq 200)
         {
+            Write-VerboseAndLog "... got OK status code back"
             $reader = $res.GetResponseStream()
             $writer = New-Object System.IO.FileStream "$data_loc\EpInfo\Tmp.zip", "Create"
             [byte[]]$buffer = New-Object byte[] 4096
+            Write-VerboseAndLog "... about to chunk the data"
             do
             {
                 $count = $reader.Read($buffer, 0, $buffer.Length)
+                Write-VerboseAndLog "... block read"
                 $writer.Write($buffer, 0, $count)
+                Write-VerboseAndLog "... and written"
             } while ($count -gt 0)
+            Write-VerboseAndLog "... transfer done"
             $reader.Close()
             $writer.Flush()
             $writer.Close()
             $res.Close()
       
             # Now extract "<language>.xml" from the Zip file
+            Write-VerboseAndLog "... opening Zip file"
             $zip = New-Object Ionic.Zip.ZipFile("$data_loc\EpInfo\Tmp.zip")
             $zip_item = $zip["$this_series_lang.xml"]
+            Write-VerboseAndLog "... extracting $this_series_lang.xml"
             $zip_item.Extract("$data_loc\EpInfo")
+            Write-VerboseAndLog "... extracted to EpInfo"
             $zip.Dispose()
       
             # Delete the zip file and rename the XML file
             Remove-Item "$data_loc\EpInfo\Tmp.zip"
             Rename-Item "$data_loc\EpInfo\$this_series_lang.xml" "$this_series_id.xml"
+            Write-VerboseAndLog "... loading '$data_loc\EpInfo\$this_series_id.xml'"
             $episode_info.Load("$data_loc\EpInfo\$this_series_id.xml")
             Write-VerboseAndLog "... downloaded episode information from server"
         }
@@ -1874,7 +1886,7 @@ Get-ChildItem -Filter "*.wtv" $recordings | ForEach-Object {
                     # and convert it into the system's date format
                     $date_to_try = $date_to_try -as [datetime]
                     Write-VerboseAndLog "... file has recording date of '$date_to_try'"
-                    if ($Series_ID[2] -eq $true -and $date_to_try -ne "" -and $date_to_try -ne $null)
+                    if ($Series_ID[3] -eq $true -and $date_to_try -ne "" -and $date_to_try -ne $null)
                     {
                         Write-Verbose "... looking for recording date match"
                         $result = MatchEpisodeByDate $date_to_try
