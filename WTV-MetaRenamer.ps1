@@ -64,6 +64,8 @@
 #          Move files to a series folder even if no match in TVDB (work item 1584)
 #          Fixed bug in extraction of episode info (work item 1725)
 #          Support for two episodes packaged within a single recording (work item 1582)
+# 0.17     Bug fix: typo (work item 1732)
+#          Feature: rename if destination file exists (work item 1733)
 #
 # Original author: Philip Colmer
 
@@ -80,7 +82,7 @@ else
   { $WhatIfPreference = $false }
   
 Set-StrictMode –version Latest
-$version = "0.16"
+$version = "0.17"
 $i_am_here = $(Get-Location -PSProvider FileSystem)
 
 function get-ld
@@ -1305,6 +1307,25 @@ function GetDeleteIfDestExists()
    Write-Output $result
 }
 
+function GetRenameIfDestExists()
+{
+   # Define the default result
+   # Default to $false - we don't rename if the destination file exists
+   $result = $false
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.rename_if_dest_exists -ne "")
+         { $result = SafeBooleanConvert $my_config.config.rename_if_dest_exists }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving rename_if_dest_exists element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
 function GetMoveEpisodeIfUnmatched()
 {
    # Define the default result
@@ -1764,7 +1785,7 @@ function ProcessFile($filename)
 			{
 				# Move the file to the specified location
                	Write-HostAndLog "... moving to '$move_unmatched_series\$filename'"
-	            Move-Item "$recordings\$filenam" "$move_unmatched_series\$filename" -ErrorAction "SilentlyContinue"
+	            Move-Item "$recordings\$filename" "$move_unmatched_series\$filename" -ErrorAction "SilentlyContinue"
 	            if ($?)
 	            {
 	            	# If we didn't get an error, write the reverse command out to an undo log file
@@ -2443,6 +2464,21 @@ function ProcessFile($filename)
                                     Remove-Item "$commercial_metadata_path\$XMLfile"
                                 }
                         	}
+                            elseif ($rename_if_dest_exists)
+                            {
+                                Write-HostAndLog "... file of that name already exists, attempting to rename this one"
+      	                  	    Rename-Item "$recordings\$filename" "$new_name" -ErrorAction "SilentlyContinue"
+	                     	    if ($?)
+	                      	    {
+	                          	    # If we didn't get an error, write the reverse command out to an undo log file
+		      	    			    if ($create_undo_logs)
+				        			    { "Rename-Item ""$recordings\$new_name"" ""$filename""" >> $undo_log }
+    	                 	    }
+	                     	    else
+	                         	{
+	                         	    Write-HostAndLog "... error during rename: $($error[0])"
+	                     	    }
+                            }
                          	elseif ($move_duplicate_episodes)
                             {
                                 Write-HostAndLog "... file of that name already exists, moving to $move_duplicate_episodes\$filename"
@@ -2733,6 +2769,7 @@ $season_number_format = GetSeasonNumberFormat
 $epnameformat = GetEpisodeNameFormat
 $create_series_folder_if_missing = GetCreateSeriesFolderIfMissing
 $delete_if_dest_exists = GetDeleteIfDestExists
+$rename_if_dest_exists = GetRenameIfDestExists
 $move_episode_if_unmatched = GetMoveEpisodeIfUnmatched
 $min_age = GetMinAge
 $char_map = GetCharacterChangeMap
@@ -2777,6 +2814,19 @@ if ($move_episode_if_unmatched -eq $true)
     {
         Throw "Cannot use <move_episode_if_unmatched> if <move_to_season_folders> is true or not defined in the XML file."
     }
+}
+
+$count = 0
+if ($delete_if_dest_exists -eq $true)
+    { $count += 1 }
+if ($rename_if_dest_exists -eq $true)
+    { $count += 1 }
+if ($move_duplicate_episodes -eq $true)
+    { $count += 1 }
+
+if ($count -gt 1)
+{
+    Throw "Can only use one of delete_if_dest_exists, rename_if_dest_exists and move_duplicate_episodes."
 }
 
 $the_time_is_now = $(Get-Date).ToString("yyyyMMddHHmmss")
