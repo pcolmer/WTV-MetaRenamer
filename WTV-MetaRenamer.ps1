@@ -66,6 +66,9 @@
 #          Support for two episodes packaged within a single recording (work item 1582)
 # 0.17     Bug fix: typo (work item 1732)
 #          Feature: rename if destination file exists (work item 1733)
+# 0.18     Bug fix: date matching (work items 2034 & 1781)
+#          Bug fix: execution path improvement (work item 2032)
+#          Feature: extension of moving metadata (work item 1120)
 #
 # Original author: Philip Colmer
 
@@ -82,8 +85,8 @@ else
   { $WhatIfPreference = $false }
   
 Set-StrictMode –version Latest
-$version = "0.17"
-$i_am_here = $(Get-Location -PSProvider FileSystem)
+$version = "0.18"
+$i_am_here = Split-Path -parent $MyInvocation.MyCommand.Definition
 
 function get-ld
 {
@@ -169,9 +172,9 @@ function get-ld
 
 function Write-VerboseAndLog($str)
 {
-	Write-Verbose $str
-	if ($create_processing_logs)
-		{ $str >> $processing_log }
+    Write-Verbose $str
+    if ($create_processing_logs)
+        { $str >> $processing_log }
 }
 
 function Write-HostAndLog($str)
@@ -179,9 +182,9 @@ function Write-HostAndLog($str)
     # Only output to host if running in interactive mode OR
     # we aren't outputting to the log file
     if ($interactive -eq $true -or $create_processing_logs -eq $false)
-	    { Write-Host $str}
-	if ($create_processing_logs)
-		{ $str >> $processing_log }
+        { Write-Host $str}
+    if ($create_processing_logs)
+        { $str >> $processing_log }
 }
 
 function FetchXml($url)
@@ -202,19 +205,19 @@ function FetchXml($url)
 
 function NodeExists($xmlnode, $to_match)
 {
-	$this_node = $xmlnode.FirstChild
-	do
-	{
-		if ($this_node.name -eq $to_match)
-		{
-			return $true
-		}
-		
-		$this_node = $this_node.NextSibling
-	} while ($this_node -ne $null)
-	
-	# Failed to match the node name we are looking for
-	Write-Output $false
+    $this_node = $xmlnode.FirstChild
+    do
+    {
+        if ($this_node.name -eq $to_match)
+        {
+            return $true
+        }
+        
+        $this_node = $this_node.NextSibling
+    } while ($this_node -ne $null)
+    
+    # Failed to match the node name we are looking for
+    Write-Output $false
 }
 
 function AllocateDBMirror
@@ -272,19 +275,19 @@ function BestMatchEpisode($text)
        Write-VerboseAndLog "... BestMatchEpisode called for '$text'"
    }
    
-	# If the text we are being asked to test against is more than twice the length of
-	# the longest episode name we have, this probably isn't valid text. For example, it
-	# could be the episode synopsis.
-	#
-	# Retrieve the previously calculated longest episode name - it is stored
-	# in the SERIES ID attribute, not the Episode ID (which is used for the scoring)
-	$longest_episode_name = $episodes.Data.Series.GetAttribute("ID")
-	if ($text.Length -gt (2 * $longest_episode_name))
-		{ Write-VerboseAndLog "... BestMatchEpisode: ignoring very long text to test against"; return }
+    # If the text we are being asked to test against is more than twice the length of
+    # the longest episode name we have, this probably isn't valid text. For example, it
+    # could be the episode synopsis.
+    #
+    # Retrieve the previously calculated longest episode name - it is stored
+    # in the SERIES ID attribute, not the Episode ID (which is used for the scoring)
+    $longest_episode_name = $episodes.Data.Series.GetAttribute("ID")
+    if ($text.Length -gt (2 * $longest_episode_name))
+        { Write-VerboseAndLog "... BestMatchEpisode: ignoring very long text to test against"; return }
    
-	# We also won't bother if we haven't been passed anything!
-	if ($text.Length -eq 0)
-   		{ Write-VerboseAndLog "... BestMatchEpisode: ignoring empty text to test against"; return }
+    # We also won't bother if we haven't been passed anything!
+    if ($text.Length -eq 0)
+        { Write-VerboseAndLog "... BestMatchEpisode: ignoring empty text to test against"; return }
    
    foreach ($episode in $episodes.Data.Episode)
    {
@@ -567,8 +570,8 @@ function MatchEpisodeImprecisely($text)
 
 function FetchEpisodeInfo($series_info)
 {
-	$this_series_id = [int]$series_info[0]
-	$this_series_lang = $series_info[1]
+    $this_series_id = [int]$series_info[0]
+    $this_series_lang = $series_info[1]
     
     # V0.16: Don't try to fetch episode information if the ID is negative
     if ($this_series_id -lt 0)
@@ -674,202 +677,202 @@ function FetchEpisodeInfo($series_info)
 
 function FetchSeriesID($series_name)
 {
-	# Make sure we have been given a series name!
-	if ($series_name -eq "")
-	{
-		Write-HostAndLog "... no series name provided"
-		return $null
-	}
+    # Make sure we have been given a series name!
+    if ($series_name -eq "")
+    {
+        Write-HostAndLog "... no series name provided"
+        return $null
+    }
 
-	# Check to see if the series name has been entered into the cached series database
-	$series_list = New-Object XML
-	$series_list.Load("$data_loc\SeriesList.xml")
-	$this_series = $series_list.Data.Series | Where-Object { $_.SeriesName -eq $series_name }
+    # Check to see if the series name has been entered into the cached series database
+    $series_list = New-Object XML
+    $series_list.Load("$data_loc\SeriesList.xml")
+    $this_series = $series_list.Data.Series | Where-Object { $_.SeriesName -eq $series_name }
    
-	if ($this_series -ne $null)
-	{
-		# Got a match - return the series ID
-		Write-VerboseAndLog "... FetchSeriesID returning $($this_series.seriesid) from cache"
-		Write-Output $this_series.seriesid
-		# If this entry in the cache specifies a language code, return that, otherwise
-		# return the default language code.
-		if (NodeExists $this_series "language")
-		{
-			Write-VerboseAndLog "... returning language code $($this_series.language)"
-			Write-Output $this_series.language
-		}
-		else
-		{
-			Write-VerboseAndLog "... returning default language code $default_language"
-			Write-Output $default_language
-		}
+    if ($this_series -ne $null)
+    {
+        # Got a match - return the series ID
+        Write-VerboseAndLog "... FetchSeriesID returning $($this_series.seriesid) from cache"
+        Write-Output $this_series.seriesid
+        # If this entry in the cache specifies a language code, return that, otherwise
+        # return the default language code.
+        if (NodeExists $this_series "language")
+        {
+            Write-VerboseAndLog "... returning language code $($this_series.language)"
+            Write-Output $this_series.language
+        }
+        else
+        {
+            Write-VerboseAndLog "... returning default language code $default_language"
+            Write-Output $default_language
+        }
         # If this entry in the cache specifies that we can use the broadcast date or the
         # date of recording, return that otherwise return false.
         if (NodeExists $this_series "MatchBroadcastDate")
         {
-			Write-VerboseAndLog "... returning MatchBroadcastDate as $($this_series.MatchBroadcastDate)"
-			Write-Output $this_series.MatchBroadcastDate
+            Write-VerboseAndLog "... returning MatchBroadcastDate as $($this_series.MatchBroadcastDate)"
+            Write-Output $this_series.MatchBroadcastDate
         }
         else
         {
-			Write-VerboseAndLog "... returning MatchBroadcastDate as $false"
+            Write-VerboseAndLog "... returning MatchBroadcastDate as $false"
             Write-Output $false
         }
         if (NodeExists $this_series "MatchRecordingDate")
         {
-			Write-VerboseAndLog "... returning MatchRecordingDate as $($this_series.MatchRecordingDate)"
-			Write-Output $this_series.MatchRecordingDate
+            Write-VerboseAndLog "... returning MatchRecordingDate as $($this_series.MatchRecordingDate)"
+            Write-Output $this_series.MatchRecordingDate
         }
         else
         {
-			Write-VerboseAndLog "... returning MatchBroadcastDate as $false"
+            Write-VerboseAndLog "... returning MatchBroadcastDate as $false"
             Write-Output $false
         }
         # Return the matching series name as well as this is needed by v0.16 when no episode data exists
         Write-Output $series_name
-		return
-	}
+        return
+    }
 
-	# If it hasn't, try to retrieve the series ID from TvDB. If only one series is returned
-	# we'll go with that. If more than one, list them out for the user to manually update
-	# the file and then bork.
-	$series_info = FetchXML "$tvdb_mirror/api/GetSeries.php?seriesname='$series_name'"
-	if (($series_info -ne $null) -and ($series_info.data -ne ""))
-	{
-		$count = 0
-		foreach ($this_series in $series_info.Data.Series) { $count++ }
+    # If it hasn't, try to retrieve the series ID from TvDB. If only one series is returned
+    # we'll go with that. If more than one, list them out for the user to manually update
+    # the file and then bork.
+    $series_info = FetchXML "$tvdb_mirror/api/GetSeries.php?seriesname='$series_name'"
+    if (($series_info -ne $null) -and ($series_info.data -ne ""))
+    {
+        $count = 0
+        foreach ($this_series in $series_info.Data.Series) { $count++ }
       
-		if ($count -gt 1)
-		{
-			# More than one match returned from TvDB - but does one of them match completely?
-			Write-VerboseAndLog "... TvDB has returned multiple matches"
+        if ($count -gt 1)
+        {
+            # More than one match returned from TvDB - but does one of them match completely?
+            Write-VerboseAndLog "... TvDB has returned multiple matches"
          
-			foreach ($this_series in $series_info.Data.Series)
-			{
-				if ($this_series.SeriesName -eq $series_name)
-				{
-					Write-VerboseAndLog "... got precise match"
-					# Add the series information automatically to the list file
-					$series_xml = @($series_list.Data.Series)[0]
-					$new_series_xml = $series_xml.Clone()
-					$new_series_xml.seriesid = $this_series.seriesid
-					# Changed to save *broadcaster's* series name, not TvDB's
-					$new_series_xml.SeriesName = $series_name.ToString() # $this_series.SeriesName
-					$rubbish_output = $series_list.Data.AppendChild($new_series_xml)
-					$series_list.Save("$data_loc\SeriesList.xml")
+            foreach ($this_series in $series_info.Data.Series)
+            {
+                if ($this_series.SeriesName -eq $series_name)
+                {
+                    Write-VerboseAndLog "... got precise match"
+                    # Add the series information automatically to the list file
+                    $series_xml = @($series_list.Data.Series)[0]
+                    $new_series_xml = $series_xml.Clone()
+                    $new_series_xml.seriesid = $this_series.seriesid
+                    # Changed to save *broadcaster's* series name, not TvDB's
+                    $new_series_xml.SeriesName = $series_name.ToString() # $this_series.SeriesName
+                    $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
+                    $series_list.Save("$data_loc\SeriesList.xml")
 
-					Write-VerboseAndLog "... returning $($this_series.seriesid), language $default_language, MatchBroadcastDate = false and MatchRecordingDate = false"
-					Write-Output $this_series.seriesid
-					Write-Output $default_language
+                    Write-VerboseAndLog "... returning $($this_series.seriesid), language $default_language, MatchBroadcastDate = false and MatchRecordingDate = false"
+                    Write-Output $this_series.seriesid
+                    Write-Output $default_language
                     Write-Output $false
                     Write-Output $false
                     # Return the matching series name as well as this is needed by v0.16 when no episode data exists
                     Write-Output $series_name
-					return
-				}
-			}
-		}
+                    return
+                }
+            }
+        }
    
-		if ($count -eq 1)
-		{
-			Write-VerboseAndLog "... FetchSeriesID has retrieved one match from TvDB"
+        if ($count -eq 1)
+        {
+            Write-VerboseAndLog "... FetchSeriesID has retrieved one match from TvDB"
             Write-VerboseAndLog "... cloning XML entry for '$series_name'"
-			# Add the series information automatically to the list file
-			$series_xml = @($series_list.Data.Series)[0]
-			$new_series_xml = $series_xml.Clone()
-			$new_series_xml.seriesid = $series_info.Data.Series.seriesid
-			# Changed to save *broadcaster's* series name, not TvDB's
+            # Add the series information automatically to the list file
+            $series_xml = @($series_list.Data.Series)[0]
+            $new_series_xml = $series_xml.Clone()
+            $new_series_xml.seriesid = $series_info.Data.Series.seriesid
+            # Changed to save *broadcaster's* series name, not TvDB's
             # Not sure what has broken PowerShell here but we seem to have to force a conversion
             # of a string to a string!
-			$new_series_xml.SeriesName = $series_name.ToString() # $series_info.Data.Series.SeriesName
-			$rubbish_output = $series_list.Data.AppendChild($new_series_xml)
-			$series_list.Save("$data_loc\SeriesList.xml")
+            $new_series_xml.SeriesName = $series_name.ToString() # $series_info.Data.Series.SeriesName
+            $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
+            $series_list.Save("$data_loc\SeriesList.xml")
 
-			Write-VerboseAndLog "... returning $($series_info.Data.Series.seriesid), language $default_language, MatchBroadcastDate = false and MatchRecordingDate = false"
-			Write-Output $series_info.Data.Series.seriesid
-			Write-Output $default_language
+            Write-VerboseAndLog "... returning $($series_info.Data.Series.seriesid), language $default_language, MatchBroadcastDate = false and MatchRecordingDate = false"
+            Write-Output $series_info.Data.Series.seriesid
+            Write-Output $default_language
             Write-Output $false
             Write-Output $false
             # Return the matching series name as well as this is needed by v0.16 when no episode data exists
             Write-Output $series_name
-		}
-		else
-		{
-			if ($interactive)
-			{
-				Write-Host "More than one series matches series name '$series_name':"
-			}
-			else
-			{
-        		Write-HostAndLog "More than one series matches series name '$series_name':"
-			}
-			$index = 1
-			foreach ($this_series in $series_info.Data.Series)
-			{
-				if ($interactive)
-				{
-					Write-Host "... [$index] $($this_series.SeriesName)"
-				}
-				else
-				{
-					Write-HostAndLog "ID: $($this_series.seriesid); Name: $($this_series.SeriesName)"
-				}
-				$index++
-			}
+        }
+        else
+        {
+            if ($interactive)
+            {
+                Write-Host "More than one series matches series name '$series_name':"
+            }
+            else
+            {
+                Write-HostAndLog "More than one series matches series name '$series_name':"
+            }
+            $index = 1
+            foreach ($this_series in $series_info.Data.Series)
+            {
+                if ($interactive)
+                {
+                    Write-Host "... [$index] $($this_series.SeriesName)"
+                }
+                else
+                {
+                    Write-HostAndLog "ID: $($this_series.seriesid); Name: $($this_series.SeriesName)"
+                }
+                $index++
+            }
          
-			# We end up with index being one too high ...
-			$index--
-	         
-			if ($interactive)
-			{
-				Write-Host "... Enter a number from 1 to $index or RETURN to skip"
-				$answer = GetInputFromUser $index
-				if ($answer -ne -1)
-				{
-					# User provided an answer in the correct range so find it and return
-					# that to the function caller
-					$index = 1
-					foreach ($this_series in $series_info.Data.Series)
-					{
-						if ($index -eq $answer)
-						{
-							# Add the series information automatically to the list file
-	                        # N.B. Because there were multiple matches for the series name
-	                        # provided, and the user has made their choice, we are going to
-	                        # record the pairing of the series name PROVIDED and the matching
-	                        # series ID. We DON'T record the *actual* series name otherwise
-	                        # it won't match next time either!
-							
-							Write-VerboseAndLog "... series ID selected as $($this_series.seriesid)"
-							
-	                        $series_xml = @($series_list.Data.Series)[0]
-	                        $new_series_xml = $series_xml.Clone()
-	                        $new_series_xml.seriesid = $this_series.seriesid
-	                        $new_series_xml.SeriesName = $series_name.ToString()
-	                        $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
-	                        $series_list.Save("$data_loc\SeriesList.xml")
+            # We end up with index being one too high ...
+            $index--
+             
+            if ($interactive)
+            {
+                Write-Host "... Enter a number from 1 to $index or RETURN to skip"
+                $answer = GetInputFromUser $index
+                if ($answer -ne -1)
+                {
+                    # User provided an answer in the correct range so find it and return
+                    # that to the function caller
+                    $index = 1
+                    foreach ($this_series in $series_info.Data.Series)
+                    {
+                        if ($index -eq $answer)
+                        {
+                            # Add the series information automatically to the list file
+                            # N.B. Because there were multiple matches for the series name
+                            # provided, and the user has made their choice, we are going to
+                            # record the pairing of the series name PROVIDED and the matching
+                            # series ID. We DON'T record the *actual* series name otherwise
+                            # it won't match next time either!
+                            
+                            Write-VerboseAndLog "... series ID selected as $($this_series.seriesid)"
+                            
+                            $series_xml = @($series_list.Data.Series)[0]
+                            $new_series_xml = $series_xml.Clone()
+                            $new_series_xml.seriesid = $this_series.seriesid
+                            $new_series_xml.SeriesName = $series_name.ToString()
+                            $rubbish_output = $series_list.Data.AppendChild($new_series_xml)
+                            $series_list.Save("$data_loc\SeriesList.xml")
 
-	                        Write-Output $this_series.seriesid
-							Write-Output $default_language
+                            Write-Output $this_series.seriesid
+                            Write-Output $default_language
                             Write-Output $false
                             Write-Output $false
                             # Return the matching series name as well as this is needed by v0.16 when no episode data exists
                             Write-Output $series_name
-	                        return
-	                    }
-	                    $index++
-					}
-				}
-			}
+                            return
+                        }
+                        $index++
+                    }
+                }
+            }
          
-			return $null
-		}
-	}
-	else
-	{
-		Write-VerboseAndLog "... failed to retrieve series information from TvDB"
-		return $null
-	}
+            return $null
+        }
+    }
+    else
+    {
+        Write-VerboseAndLog "... failed to retrieve series information from TvDB"
+        return $null
+    }
 }
 
 function SafeBooleanConvert([string]$value)
@@ -886,71 +889,71 @@ function SafeBooleanConvert([string]$value)
 
 function CheckForUpdatesSinceLastRun()
 {
-	# See if we've been run before (i.e. we preserved the TvDB server time)
-	try
-	{
-	   $previous_time = New-Object XML
-	   $previous_time.Load("$data_loc\updates.xml")
-	}
+    # See if we've been run before (i.e. we preserved the TvDB server time)
+    try
+    {
+       $previous_time = New-Object XML
+       $previous_time.Load("$data_loc\updates.xml")
+    }
 
-	catch
-	{
-	   $previous_time = $null
-	}
+    catch
+    {
+       $previous_time = $null
+    }
 
-	# Get the current server time and save it away. We do this before anything
-	# else as we always want to do this, even if this is the first run.
-	$server_time = FetchXml "http://www.thetvdb.com/api/Updates.php?type=none"
-	if ($server_time -ne $null)
-	   { $server_time.Save("$data_loc\updates.xml") }
+    # Get the current server time and save it away. We do this before anything
+    # else as we always want to do this, even if this is the first run.
+    $server_time = FetchXml "http://www.thetvdb.com/api/Updates.php?type=none"
+    if ($server_time -ne $null)
+       { $server_time.Save("$data_loc\updates.xml") }
 
-	# If we have a previous time, see which series have been updated since
-	# last time. For any series that we have been caching, delete the episode
-	# cache. This will cause the script to re-download the episode list if
-	# we need to.
-	if ($previous_time -ne $null)
-	{
-	    $time = $previous_time.items.time
-	    $changes = FetchXML "http://www.thetvdb.com/api/Updates.php?type=all&time=$time"
-	    if ($changes -ne $null)
-	    {
-			if (NodeExists $changes.items "series")
-			{
-		        foreach ($s in $changes.items.series)
-		        {
-		            if (Test-Path "$data_loc\EpInfo\$s.xml")
-		            {
-		                Write-VerboseAndLog "... series $s has been changed"
+    # If we have a previous time, see which series have been updated since
+    # last time. For any series that we have been caching, delete the episode
+    # cache. This will cause the script to re-download the episode list if
+    # we need to.
+    if ($previous_time -ne $null)
+    {
+        $time = $previous_time.items.time
+        $changes = FetchXML "http://www.thetvdb.com/api/Updates.php?type=all&time=$time"
+        if ($changes -ne $null)
+        {
+            if (NodeExists $changes.items "series")
+            {
+                foreach ($s in $changes.items.series)
+                {
+                    if (Test-Path "$data_loc\EpInfo\$s.xml")
+                    {
+                        Write-VerboseAndLog "... series $s has been changed"
                         # Force -whatif to be false because WhatIfPreference (set at the
                         # top of the script) would otherwise potentially stop this file
                         # deletion from happening!
-		                Remove-Item "$data_loc\EpInfo\$s.xml" -whatif:$false
-		            }
-		        }
-			}
+                        Remove-Item "$data_loc\EpInfo\$s.xml" -whatif:$false
+                    }
+                }
+            }
             else
             {
                 Write-Host "No series updates"
             }
-	    }
-	}
+        }
+    }
 }
 
 function RemapFilename($name)
 {
-	$new_name = $name
+    $new_name = $name
     if ($char_map -ne $null)
     {
-    	foreach ($cm in $char_map)
-	    {
-		    # convert the "from" string to an array so that we can check for one char at a time
-		    $cma = $($cm.from).ToCharArray()
-		    # then step through each character, trying to replace any occurences with the "to" string
-		    foreach ($c in $cma)
-		    {
-			    $new_name = $new_name.Replace([string]$c, $cm.to)
-		    }
-	    }
+        foreach ($cm in $char_map)
+        {
+            # convert the "from" string to an array so that we can check for one char at a time
+            $cma = $($cm.from).ToCharArray()
+            # then step through each character, trying to replace any occurences with the "to" string
+            foreach ($c in $cma)
+            {
+                $new_name = $new_name.Replace([string]$c, $cm.to)
+            }
+        }
     }
     
     Write-Output $new_name
@@ -958,61 +961,61 @@ function RemapFilename($name)
 
 function SeriesIsInIgnoreList($series_ID)
 {
-	Write-VerboseAndLog "... SeriesIsInIgnoreList"
-	$result = $false
-	
-	if ($ignore_series -eq $null)
-	{
-		Write-VerboseAndLog "...... ignore list is empty"
-	}
-	else
-	{
-		foreach ($s in $ignore_series)
-		{
-			if ($s -eq $series_ID)
-			{
+    Write-VerboseAndLog "... SeriesIsInIgnoreList"
+    $result = $false
+    
+    if ($ignore_series -eq $null)
+    {
+        Write-VerboseAndLog "...... ignore list is empty"
+    }
+    else
+    {
+        foreach ($s in $ignore_series)
+        {
+            if ($s -eq $series_ID)
+            {
                 Write-HostAndLog "... recording is from a series on the ignore list; skipping"
-				$result = $true
-			}
-		}
-	}
-	
-	Write-VerboseAndLog "...... returning $result"
-	return $result
+                $result = $true
+            }
+        }
+    }
+    
+    Write-VerboseAndLog "...... returning $result"
+    return $result
 }
 
 function SeriesIsNotInOnlyList($series_ID)
 {
-	Write-VerboseAndLog "... SeriesIsNotInOnlyList"
-	$result = $false
-	
-	if ($only_series -eq $null)
-	{
-		Write-VerboseAndLog "...... only list is empty"
-	}
-	else
-	{
-		$notfound = $true
-		foreach ($s in $only_series)
-		{
-			if ($s -eq $series_ID)
-			{
-				$notfound = $false
-			}
-		}
-		if ($notfound)
-		{
-			Write-HostAndLog "... recording is from a series that is not on the only list; skipping"
-		}
-		else
-		{
-			Write-VerboseAndLog "...... matched $series_ID"
-		}
-		$result = $notfound
-	}
-	
-	Write-VerboseAndLog "...... returning $result"
-	return $result
+    Write-VerboseAndLog "... SeriesIsNotInOnlyList"
+    $result = $false
+    
+    if ($only_series -eq $null)
+    {
+        Write-VerboseAndLog "...... only list is empty"
+    }
+    else
+    {
+        $notfound = $true
+        foreach ($s in $only_series)
+        {
+            if ($s -eq $series_ID)
+            {
+                $notfound = $false
+            }
+        }
+        if ($notfound)
+        {
+            Write-HostAndLog "... recording is from a series that is not on the only list; skipping"
+        }
+        else
+        {
+            Write-VerboseAndLog "...... matched $series_ID"
+        }
+        $result = $notfound
+    }
+    
+    Write-VerboseAndLog "...... returning $result"
+    return $result
 }
 
 # No longer needed as of v0.12. Do the lookup once and store in variables
@@ -1063,20 +1066,20 @@ function LoadConfigFile()
 
 function GetDefaultLanguage()
 {
-	# The default language is "en" (English) - we'll use this if nothing else is specified.
-	$result = "en"
+    # The default language is "en" (English) - we'll use this if nothing else is specified.
+    $result = "en"
 
-	try {
-		# Only override the default value if a value has actually been provided!
-		if ($my_config.config.default_language -ne "")
-			{ $result = $my_config.config.default_language }
-	}
+    try {
+        # Only override the default value if a value has actually been provided!
+        if ($my_config.config.default_language -ne "")
+            { $result = $my_config.config.default_language }
+    }
    
-	catch {
-		Write-Verbose "... error while retrieving default_language element: $($_.Exception.Message)"
-	}  
+    catch {
+        Write-Verbose "... error while retrieving default_language element: $($_.Exception.Message)"
+    }  
    
-	Write-Output $result
+    Write-Output $result
 }
 
 function GetXMLCachePath()
@@ -1738,12 +1741,48 @@ function GetCommercialMetadataPath()
    Write-Output $result
 }
 
+# Multi-purpose functions to move the specified file from the specified directory. This is used for
+# the original recording and also optionally for meta data files.
+function MoveFile($fromDir, $fromName, $toDir, $toName, $tag)
+{
+    if (Test-Path "$fromDir\$fromName")
+    {
+       Write-HostAndLog "... moving to '$toDir\$toName'"
+       Move-Item "$fromDir\$fromName" "$toDir\$toName" -ErrorAction SilentlyContinue
+       if ($?)
+       {
+          # If we didn't get an error, write the reverse command out to an undo log file
+          if ($create_undo_logs)
+             { "Move-Item ""$toDir\$toName"" ""$fromDir\$fromName""" >> $undo_log }
+       }
+       else
+       {
+          Write-HostAndLog "... error during '$tag' move of $fromDir\$fromName - $($error[0])"
+       }
+    }
+    else
+    {
+        Write-VerboseAndLog "... skipping move of $directory\$leafname because it doesn't exist"
+    }
+}
+
+function MoveFileToUnmatched($directory, $leafname)
+{
+      MoveFile $directory $leafname $move_unmatched_series $leafname "unmatched series"
+}
+
+function MoveFileToIgnored($directory, $leafname)
+{
+      MoveFile $directory $leafname $move_ignored_series $leafname "ignored series"
+}
+
 function ProcessFile($filename)
 {
-	Write-HostAndLog "Processing $filename"
+    Write-HostAndLog "Processing $filename"
     $file = $folder.ParseName($filename)
     # V0.16: build an XML filename for possible ShowAnalyzer processing
-    $XMLFile = $($file.Name) + ".xml"
+    # V0.18: deprecated to make the code more flexible for other file extensions
+    # $XMLFile = $($file.Name) + ".xml"
 
     $combined_title_and_episode = $false
 
@@ -1751,13 +1790,13 @@ function ProcessFile($filename)
     Write-VerboseAndLog "... title is '$this_title'"
     
     # Before we do ANYTHING else, let's see if the file is old enough.
-	$old_enough = $true
+    $old_enough = $true
     if ($min_age -ne $null)
     {
         $date_created = $($folder.GetDetailsOf($file, $index_date_created)) # GetFileAttribute $folder $file "Date created"
         # This is a string so we need to convert it into a date/time value
         $date_created = [datetime]::ParseExact($date_created, "g", $null)
-		Write-VerboseAndLog "... got creation date of $date_created"
+        Write-VerboseAndLog "... got creation date of $date_created"
         if ($date_created -ge $min_age)
         {
             $old_enough = $false
@@ -1765,106 +1804,54 @@ function ProcessFile($filename)
         }
     }
     
-	if ($old_enough)
-	{
-	    $series_ID = FetchSeriesID $this_title
-	    if ($series_ID -eq $null -and $this_title.IndexOf(":") -ne -1)
-	    {
-	    	# Let's see if the broadcaster has munged the title and episode name together
-	    	$series_ID = FetchSeriesID $($this_title.split(":")[0])
-			if ($series_ID -ne $null)
-			{
-				# Indicate that we may have the episode name in the title string for later parsing
-				$combined_title_and_episode = $true
-			}
-	    }
-	    if ($series_ID -eq $null)
-	    {
-	        Write-HostAndLog "... no series ID retrieved for this recording"
-			if ($move_unmatched_series -ne $null)
-			{
-				# Move the file to the specified location
-               	Write-HostAndLog "... moving to '$move_unmatched_series\$filename'"
-	            Move-Item "$recordings\$filename" "$move_unmatched_series\$filename" -ErrorAction "SilentlyContinue"
-	            if ($?)
-	            {
-	            	# If we didn't get an error, write the reverse command out to an undo log file
-					if ($create_undo_logs)
-						{ "Move-Item ""$move_unmatched_series\$filename"" ""$recordings\$filename""" >> $undo_log }
-                        
-                    # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs moving
-                    if (Test-Path "$commercial_metadata_path\$XMLfile")
-                    {
-                        Write-HostAndLog "... moving XML file as well"
-                        Move-Item "$commercial_metadata_path\$XMLfile" "$move_unmatched_series\$XMLfile" -ErrorAction "SilentlyContinue"
-                        if ($?)
-                        {
-                            # If we didn't get an error, write the reverse command out to an undo log file
-                            if ($create_undo_logs)
-                                { "Move-Item ""$move_unmatched_series\$XMLfile"" ""$commercial_metadata_path\$XMLfile""" >> $undo_log }
-                        }
-                        else
-                        {
-                            Write-HostAndLog "... error during 'unmatched series' move of XML file: $($error[0])"
-                        }
-                    }
-	            }
-	            else
-	            {
-	            	Write-HostAndLog "... error during 'unmatched series' move: $($error[0])"
-	            }
-			}
-	    }
-		else
-		{
-			if ((SeriesIsInIgnoreList $series_ID[0]) -eq $true -or (SeriesIsNotInOnlyList $series_ID[0]) -eq $true)
-			{
+    if ($old_enough)
+    {
+        $series_ID = FetchSeriesID $this_title
+        if ($series_ID -eq $null -and $this_title.IndexOf(":") -ne -1)
+        {
+            # Let's see if the broadcaster has munged the title and episode name together
+            $series_ID = FetchSeriesID $($this_title.split(":")[0])
+            if ($series_ID -ne $null)
+            {
+                # Indicate that we may have the episode name in the title string for later parsing
+                $combined_title_and_episode = $true
+            }
+        }
+        if ($series_ID -eq $null)
+        {
+            Write-HostAndLog "... no series ID retrieved for this recording"
+            if ($move_unmatched_series -ne $null)
+            {
+                # Move the file to the specified location
+                MoveFileToUnmatched $recordings $filename
+                MoveFileToUnmatched $commercial_metadata_path $($file.Name) + ".xml"
+                MoveFileToUnmatched $commercial_metadata_path $($file.Name) + ".vprj"
+            }
+        }
+        else
+        {
+            if ((SeriesIsInIgnoreList $series_ID[0]) -eq $true -or (SeriesIsNotInOnlyList $series_ID[0]) -eq $true)
+            {
                 # We are either ignoring this series, or the series isn't on our "only" list ... which sort of means
                 # we are also ignoring it!
                 #
                 # So, if configured to move ignored episodes, move this one ...
                 if ($move_ignored_series)
                 {
-                    Write-HostAndLog "... moving to $move_ignored_series\$filename"
-	                Move-Item "$recordings\$filename" "$move_ignored_series\$filename" -ErrorAction "SilentlyContinue"
-	                if ($?)
-	                {
-	                    # If we didn't get an error, write the reverse command out to an undo log file
-		                if ($create_undo_logs)
-				            { "Move-Item ""$move_ignored_series\$filename"" ""$recordings\$filename""" >> $undo_log }
-                        
-                        # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs moving
-                        if (Test-Path "$commercial_metadata_path\$XMLfile")
-                        {
-                            Write-HostAndLog "... moving XML file as well"
-                            Move-Item "$commercial_metadata_path\$XMLfile" "$move_ignored_series\$XMLfile" -ErrorAction "SilentlyContinue"
-                            if ($?)
-                            {
-                                # If we didn't get an error, write the reverse command out to an undo log file
-                                if ($create_undo_logs)
-                                    { "Move-Item ""$move_ignored_series\$XMLfile"" ""$commercial_metadata_path\$XMLfile""" >> $undo_log }
-                            }
-                            else
-                            {
-                                Write-HostAndLog "... error during 'ignored series' move of XML file: $($error[0])"
-                            }
-                        }
-	                }
-	                else
-	                {
-	                   Write-HostAndLog "... error during 'ignored series' move: $($error[0])"
-	                }
+                   MoveFileToIgnored $recordings $filename
+                   MoveFileToIgnored $commercial_metadata_path $($file.Name) + ".xml"
+                   MoveFileToIgnored $commercial_metadata_path $($file.Name) + ".vprj"
                 }                
                 # Then reset the series ID to null so that we don't do anything else with this recording
-				$series_ID = $null
-			}
-		}
+                $series_ID = $null
+            }
+        }
 
-		if ($series_ID -ne $null)
-	    {
-			# Matched the series against the cache/database.
-			$this_season = 0
-			$this_episode = 0
+        if ($series_ID -ne $null)
+        {
+            # Matched the series against the cache/database.
+            $this_season = 0
+            $this_episode = 0
             $multi_episode = $false
             $second_episode = -1
             
@@ -1876,130 +1863,133 @@ function ProcessFile($filename)
             }
             else
             {
-	       		$episodes = FetchEpisodeInfo $series_ID
+                $episodes = FetchEpisodeInfo $series_ID
             }
             
-			if ($episodes -ne $null)
-	        {
-    			# See if we can match the episode name.
-	            # Start with the simplest approach - the subtitle entry.
-	            $subtitle = $($folder.GetDetailsOf($file, $index_subtitle)) # GetFileAttribute $folder $file "Subtitle"
-	            if ($subtitle -ne "")
-	        	{
-	            	Write-VerboseAndLog "... testing against the subtitle metadata"
-	            	$result = MatchEpisodePrecisely $subtitle
-	            	$this_season = $result[0]
-	            	$this_episode = $result[1]
-	           
-	            	if ($this_episode -eq 0)
-	            	{
-	                	# We have a string but it didn't match so let's calculate the edit distances
-	                	BestMatchEpisode $subtitle
-	              	}
-	           	}
-	           	if ($this_episode -eq 0)
-	           	{
-	            	# OK - subtitle entry doesn't work. Another common approach is for the
-	            	# description to start with the episode name and be terminated by a colon and a space.
-	            	$try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
-	            	$try_this = [regex]::split($try_this, ': ')[0]
-
-	              	Write-VerboseAndLog "... testing against the description and colon delimiter"
-	              	$result = MatchEpisodePrecisely $try_this
-	              	$this_season = $result[0]
-	              	$this_episode = $result[1]
-
-	              	if ($this_episode -eq 0)
-	              	{
-	                 	# We have a string but it didn't match so let's calculate the edit distances
-	                 	BestMatchEpisode $try_this
-	              	}
-	           	}
-	           	if ($this_episode -eq 0 -and $combined_title_and_episode -eq $true)
-	           	{
-	              	# We earlier matched against a title string that looked as if it
-	              	# was a combination of series name and episode name. Let's see if
-	              	# that really is the case.
-	              	$colon = $this_title.IndexOf(":")
-	              	$try_this = $this_title.substring($colon+1)
-	              	$try_this = $try_this.TrimStart()
-
-	              	Write-VerboseAndLog "... testing against title string combo of series and episode"
-	              	$result = MatchEpisodePrecisely $try_this
-	              	$this_season = $result[0]
-	              	$this_episode = $result[1]
-
-	              	if ($this_episode -eq 0)
-	              	{
-	                 	# We have a string but it didn't match so let's calculate the edit distances
-	                 	BestMatchEpisode $try_this
-	              	}
-	           	}
-	           	if ($this_episode -eq 0)
-	           	{
-	              	# Look for a title embedded in the description but ending with a full-stop instead of a colon.
-	              	$try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
-	            	$try_this = [regex]::split($try_this, '\. ')[0]
-
-	              	Write-VerboseAndLog "... testing against the description and full-stop delimiter"
-	              	$result = MatchEpisodePrecisely $try_this
-	              	$this_season = $result[0]
-	              	$this_episode = $result[1]
-
-	              	if ($this_episode -eq 0)
-	              	{
-	                 	# We have a string but it didn't match so let's calculate the edit distances
-	                 	BestMatchEpisode $try_this
-	              	}
-	           	}
-	           	if ($this_episode -eq 0)
-	           	{
-	              	# The BBC sometimes put the title in the description, but prefix it with <episode number>/<episodes in series>.
-	              	# Look to see if that pattern has been followed.
-	              	$try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
-	              	$split_at = $try_this.IndexOf(". ")
-	              	if ($split_at -ne -1)
-	              	{
-	                  	# Break down the numbers, partly as a sanity check that we have got the correct structure, but
-	                  	# also to use the ep number provided to double-check things ... potentially!
-	                  	$slash = $try_this.IndexOf("/")
-	                  	if ($slash -ne -1 -and $slash -lt $split_at)
-	                  	{
-	                      	# Strip off the front stuff
-	                      	$try_this = $try_this.Substring($split_at+2, $try_this.Length - $split_at - 3)
-	                      	# Now look for a colon or full-stop after the episode name and split at
-	                      	# whichever comes first.
-	                      	$split_at = $try_this.IndexOf(":")
-	                      	$fullstop = $try_this.IndexOf(".")
-	                      	if ($split_at -eq -1)
-	                      	{
-	                          	# No colon so use where we found the full-stop
-	                          	$split_at = $fullstop
-	                      	}
-	                      	elseif ($fullstop -ne -1 -and $fullstop -lt $split_at)
-	                      	{
-	                          	# Full stop comes before a colon - use that
-	                          	$split_at = $fullstop
-	                      	}
-	                      	if ($split_at -ne -1)
-	                      	{
-	                          	$try_this = $try_this.Substring(0, $split_at)
-	                      	}
-
-	                      	Write-VerboseAndLog "... testing against BBC format description field"
-	                      	$result = MatchEpisodePrecisely $try_this
-	                      	$this_season = $result[0]
-	                      	$this_episode = $result[1]
-
-	                      	if ($this_episode -eq 0)
-	                      	{
-	                         	# We have a string but it didn't match so let's calculate the edit distances
-	                         	BestMatchEpisode $try_this
-	                      	}
-	                  	}
-	              	}
-	           	}
+            if ($episodes -ne $null)
+            {
+                # See if we can match the episode name.
+                # Start with the simplest approach - the subtitle entry.
+                $subtitle = $($folder.GetDetailsOf($file, $index_subtitle)) # GetFileAttribute $folder $file "Subtitle"
+                if ($subtitle -ne "")
+                {
+                    Write-VerboseAndLog "... testing against the subtitle metadata"
+                    $result = MatchEpisodePrecisely $subtitle
+                    $this_season = $result[0]
+                    $this_episode = $result[1]
+               
+                    if ($this_episode -eq 0)
+                    {
+                        # We have a string but it didn't match so let's calculate the edit distances
+                        BestMatchEpisode $subtitle
+                    }
+                }
                 if ($this_episode -eq 0)
+                {
+                    # OK - subtitle entry doesn't work. Another common approach is for the
+                    # description to start with the episode name and be terminated by a colon and a space.
+                    $try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
+                    $try_this = [regex]::split($try_this, ': ')[0]
+
+                    Write-VerboseAndLog "... testing against the description and colon delimiter"
+                    $result = MatchEpisodePrecisely $try_this
+                    $this_season = $result[0]
+                    $this_episode = $result[1]
+
+                    if ($this_episode -eq 0)
+                    {
+                        # We have a string but it didn't match so let's calculate the edit distances
+                        BestMatchEpisode $try_this
+                    }
+                }
+                if ($this_episode -eq 0 -and $combined_title_and_episode -eq $true)
+                {
+                    # We earlier matched against a title string that looked as if it
+                    # was a combination of series name and episode name. Let's see if
+                    # that really is the case.
+                    $colon = $this_title.IndexOf(":")
+                    $try_this = $this_title.substring($colon+1)
+                    $try_this = $try_this.TrimStart()
+
+                    Write-VerboseAndLog "... testing against title string combo of series and episode"
+                    $result = MatchEpisodePrecisely $try_this
+                    $this_season = $result[0]
+                    $this_episode = $result[1]
+
+                    if ($this_episode -eq 0)
+                    {
+                        # We have a string but it didn't match so let's calculate the edit distances
+                        BestMatchEpisode $try_this
+                    }
+                }
+                if ($this_episode -eq 0)
+                {
+                    # Look for a title embedded in the description but ending with a full-stop instead of a colon.
+                    $try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
+                    $try_this = [regex]::split($try_this, '\. ')[0]
+
+                    Write-VerboseAndLog "... testing against the description and full-stop delimiter"
+                    $result = MatchEpisodePrecisely $try_this
+                    $this_season = $result[0]
+                    $this_episode = $result[1]
+
+                    if ($this_episode -eq 0)
+                    {
+                        # We have a string but it didn't match so let's calculate the edit distances
+                        BestMatchEpisode $try_this
+                    }
+                }
+                if ($this_episode -eq 0)
+                {
+                    # The BBC sometimes put the title in the description, but prefix it with <episode number>/<episodes in series>.
+                    # Look to see if that pattern has been followed.
+                    $try_this = $folder.GetDetailsOf($file, $index_program_description) # GetFileAttribute $folder $file "Program description"
+                    $split_at = $try_this.IndexOf(". ")
+                    if ($split_at -ne -1)
+                    {
+                        # Break down the numbers, partly as a sanity check that we have got the correct structure, but
+                        # also to use the ep number provided to double-check things ... potentially!
+                        $slash = $try_this.IndexOf("/")
+                        if ($slash -ne -1 -and $slash -lt $split_at)
+                        {
+                            # Strip off the front stuff
+                            $try_this = $try_this.Substring($split_at+2, $try_this.Length - $split_at - 3)
+                            # Now look for a colon or full-stop after the episode name and split at
+                            # whichever comes first.
+                            $split_at = $try_this.IndexOf(":")
+                            $fullstop = $try_this.IndexOf(".")
+                            if ($split_at -eq -1)
+                            {
+                                # No colon so use where we found the full-stop
+                                $split_at = $fullstop
+                            }
+                            elseif ($fullstop -ne -1 -and $fullstop -lt $split_at)
+                            {
+                                # Full stop comes before a colon - use that
+                                $split_at = $fullstop
+                            }
+                            if ($split_at -ne -1)
+                            {
+                                $try_this = $try_this.Substring(0, $split_at)
+                            }
+
+                            Write-VerboseAndLog "... testing against BBC format description field"
+                            $result = MatchEpisodePrecisely $try_this
+                            $this_season = $result[0]
+                            $this_episode = $result[1]
+
+                            if ($this_episode -eq 0)
+                            {
+                                # We have a string but it didn't match so let's calculate the edit distances
+                                BestMatchEpisode $try_this
+                            }
+                        }
+                    }
+                }
+                Write-VerboseAndLog "... got to broadcast date test with this_episode = $this_episode"
+                # v0.18 - if this_episode <= 0, we have either not matched at all (= 0) or we've matched
+                # multiple times (= -1) in which case we hope that dates will help us to match more precisely
+                if ($this_episode -le 0)
                 {
                     # If the recording has a broadcast date attribute AND the series configuration
                     # allows us to use the broadcast date, see if we can match.
@@ -2013,13 +2003,16 @@ function ProcessFile($filename)
                     {
                         Write-Verbose "... looking for broadcast date match"
                         $result = MatchEpisodeByDate $date_to_try
-	                    $this_season = $result[0]
-	                    $this_episode = $result[1]
+                        $this_season = $result[0]
+                        $this_episode = $result[1]
                     }
                     else
                       { Write-Verbose "... not looking for broadcast date match" }
                 }
-                if ($this_episode -eq 0)
+                Write-VerboseAndLog "... got to recording date test with this_episode = $this_episode"
+                # v0.18 - if this_episode <= 0, we have either not matched at all (= 0) or we've matched
+                # multiple times (= -1) in which case we hope that dates will help us to match more precisely
+                if ($this_episode -le 0)
                 {
                     # If the series configuration allows us to use the date of recording the programme,
                     # see if we can match. This should work well if Media Centre is set up to record
@@ -2034,19 +2027,19 @@ function ProcessFile($filename)
                     {
                         Write-Verbose "... looking for recording date match"
                         $result = MatchEpisodeByDate $date_to_try
-	                    $this_season = $result[0]
-	                    $this_episode = $result[1]
+                        $this_season = $result[0]
+                        $this_episode = $result[1]
                     }
                     else
                       { Write-Verbose "... not looking for recording date match" }
                 }
                 if ($this_episode -eq 0)
                 {
-	              	Write-VerboseAndLog "... testing against semi-colon multi-titles"
+                    Write-VerboseAndLog "... testing against semi-colon multi-titles"
                     # V0.16: If there is a semi-colon in the episode name, try to treat it as two episode names
                     # and get the two episode numbers
-	            	$try_this = $folder.GetDetailsOf($file, $index_subtitle)
-	            	$parts = [regex]::split($try_this, ';')
+                    $try_this = $folder.GetDetailsOf($file, $index_subtitle)
+                    $parts = [regex]::split($try_this, ';')
                     # We're going to play safe and ONLY do this if there are two parts
                     if ($parts.Length -eq 2)
                     {
@@ -2095,14 +2088,14 @@ function ProcessFile($filename)
                 # strings again
                 if ($this_episode -eq 0)
                 {
-       	            $subtitle = $($folder.GetDetailsOf($file, $index_subtitle))
+                    $subtitle = $($folder.GetDetailsOf($file, $index_subtitle))
                     if ($subtitle -ne "")
-	            	{
+                    {
                         Write-VerboseAndLog "... imprecise testing against the subtitle metadata"
                         $result = MatchEpisodeImprecisely $subtitle
                         $this_season = $result[0]
                         $this_episode = $result[1]
-	           
+               
                         if ($this_episode -eq 0)
                         {
                             # We have a string but it didn't match so let's calculate the edit distances
@@ -2110,130 +2103,130 @@ function ProcessFile($filename)
                         }
                     }
                 }
-	           	if ($this_episode -eq 0)
-	           	{
-	            	$try_this = $folder.GetDetailsOf($file, $index_program_description)
+                if ($this_episode -eq 0)
+                {
+                    $try_this = $folder.GetDetailsOf($file, $index_program_description)
 
-	              	Write-VerboseAndLog "... imprecise testing against the description"
-	              	$result = MatchEpisodeImprecisely $try_this
-	              	$this_season = $result[0]
-	              	$this_episode = $result[1]
+                    Write-VerboseAndLog "... imprecise testing against the description"
+                    $result = MatchEpisodeImprecisely $try_this
+                    $this_season = $result[0]
+                    $this_episode = $result[1]
 
-	              	if ($this_episode -eq 0)
-	              	{
-	                 	# We have a string but it didn't match so let's calculate the edit distances
-	                 	BestMatchEpisode $try_this
-	              	}
-	           	}
+                    if ($this_episode -eq 0)
+                    {
+                        # We have a string but it didn't match so let's calculate the edit distances
+                        BestMatchEpisode $try_this
+                    }
+                }
 
-	           	# That's all the tests we know to do
-	           
-	           	if ($this_episode -eq 0)
-	           	{
-	              	Write-VerboseAndLog "... no precise test"
-	              	# If we have 0, we've got one or more results from Best Match.
-	              	# If we have ONE match and $accept_single_bme is true, take that one.
-	              	# If we have more than one match and $interactive is true, offer the list to the user.
+                # That's all the tests we know to do
+               
+                if ($this_episode -eq 0)
+                {
+                    Write-VerboseAndLog "... no precise test"
+                    # If we have 0, we've got one or more results from Best Match.
+                    # If we have ONE match and $accept_single_bme is true, take that one.
+                    # If we have more than one match and $interactive is true, offer the list to the user.
 
-	              	$lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
-	              	foreach ($episode in $episodes.Data.Episode)
-	              	{
+                    $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
+                    foreach ($episode in $episodes.Data.Episode)
+                    {
                        # 0.08: changed logic so that scores of -1 are ignored
-	                   if (($lowest_score -le 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0) -and ([int]$($episode.GetAttribute("ID")) -ne -1)))
-	                      { $lowest_score = [int]$($episode.GetAttribute("ID")) }
-	              	}
-	              	Write-VerboseAndLog "... best matches have a score of $lowest_score"
+                       if (($lowest_score -le 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0) -and ([int]$($episode.GetAttribute("ID")) -ne -1)))
+                          { $lowest_score = [int]$($episode.GetAttribute("ID")) }
+                    }
+                    Write-VerboseAndLog "... best matches have a score of $lowest_score"
 
-	              	$match_count = 0
-	              	foreach ($episode in $episodes.Data.Episode)
-	              	{
-	                  	if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
-	                  	{
-	                      	$match_count++
-	                      	$this_season = [int]$episode.SeasonNumber
-	                      	$this_episode = [int]$episode.EpisodeNumber
-	                  	}
-	              	}
+                    $match_count = 0
+                    foreach ($episode in $episodes.Data.Episode)
+                    {
+                        if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                        {
+                            $match_count++
+                            $this_season = [int]$episode.SeasonNumber
+                            $this_episode = [int]$episode.EpisodeNumber
+                        }
+                    }
 
-	              	Write-VerboseAndLog "... got $match_count best matches"
-	              	if ($match_count -ne 1)
-	              	{
-	                  	# We've got more than one match - are we running in interactive mode?
-	                  	if ($interactive)
-	                  	{
-	                      	# Yes - display the list and see which one the user picks
-	                      	$index = 1
-	                      	foreach ($episode in $episodes.Data.Episode)
-	                      	{
-	                          	if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
-	                          	{
-	                              	$s = $([int]$episode.SeasonNumber).ToString("0#")
-	                              	$e = $([int]$episode.EpisodeNumber).ToString("0#")
+                    Write-VerboseAndLog "... got $match_count best matches"
+                    if ($match_count -ne 1)
+                    {
+                        # We've got more than one match - are we running in interactive mode?
+                        if ($interactive)
+                        {
+                            # Yes - display the list and see which one the user picks
+                            $index = 1
+                            foreach ($episode in $episodes.Data.Episode)
+                            {
+                                if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                                {
+                                    $s = $([int]$episode.SeasonNumber).ToString("0#")
+                                    $e = $([int]$episode.EpisodeNumber).ToString("0#")
                                     $a = $episode.FirstAired
                                     if ($a -ne $null)
                                         { $a = "[Original airdate: $a]" }
 
-	                              	Write-Host "... [$index] S$($s)E$($e) - $($episode.EpisodeName) $a"
-	                              	$index++
-	                          	}
-	                      	}
+                                    Write-Host "... [$index] S$($s)E$($e) - $($episode.EpisodeName) $a"
+                                    $index++
+                                }
+                            }
 
-	                      	# We end up with index being one too high ...
-	                      	$index--
-	         
-	                      	Write-Host "... Enter a number from 1 to $index or RETURN to skip"
-	                      	$answer = GetInputFromUser $index
-	                      	if ($answer -ne -1)
-	                      	{
-	                          	# User provided an answer in the correct range so find it
-	                          	$index = 1
-	                          	foreach ($episode in $episodes.Data.Episode)
-	                          	{
-	                              	if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
-	                              	{
-	                                  	if ($index -eq $answer)
-	                                  	{
-	                                      	$this_season = [int]$episode.SeasonNumber
-	                                      	$this_episode = [int]$episode.EpisodeNumber
-	                                  	}
-	                                  	$index++
-	                              	}
-	                          	}
-	                      	}
-	                      	else
-	                      	{
-	                          	# User skipped - set episode to -1 so that we
-	                          	# drop through but don't list the "matching" episodes all over again
-	                          	$this_episode = -1
-	                      	}
-	                  	}
-	                  	else
-	                  	{
-	                      	# No - reset $this_episode to 0 so that we drop through to
-	                      	# the code below that lists the matches
-	                      	$this_episode = 0
-	                  	}
-	              	}
-	           	}
+                            # We end up with index being one too high ...
+                            $index--
+             
+                            Write-Host "... Enter a number from 1 to $index or RETURN to skip"
+                            $answer = GetInputFromUser $index
+                            if ($answer -ne -1)
+                            {
+                                # User provided an answer in the correct range so find it
+                                $index = 1
+                                foreach ($episode in $episodes.Data.Episode)
+                                {
+                                    if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                                    {
+                                        if ($index -eq $answer)
+                                        {
+                                            $this_season = [int]$episode.SeasonNumber
+                                            $this_episode = [int]$episode.EpisodeNumber
+                                        }
+                                        $index++
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                # User skipped - set episode to -1 so that we
+                                # drop through but don't list the "matching" episodes all over again
+                                $this_episode = -1
+                            }
+                        }
+                        else
+                        {
+                            # No - reset $this_episode to 0 so that we drop through to
+                            # the code below that lists the matches
+                            $this_episode = 0
+                        }
+                    }
+                }
             }
             
             # Since V0.16 allows us to move episodes even if they are unmatched, we now
             # check that logic even if we didn't get any episode data.
-         	if (($this_episode -gt 0) -or ($move_episode_if_unmatched -eq $true))
-           	{
+            if (($this_episode -gt 0) -or ($move_episode_if_unmatched -eq $true))
+            {
                 if ($this_episode -gt 0)
                 {
-                   	Write-HostAndLog "... matched against season $this_season and episode $this_episode"
-	               	# Retrieve the TvDB version of the episode name
-	               	$episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $this_episode }
+                    Write-HostAndLog "... matched against season $this_season and episode $this_episode"
+                    # Retrieve the TvDB version of the episode name
+                    $episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $this_episode }
                     $episode_name = $($episode_data.EpisodeName)
-	               	# Build the name we are going to rename to
+                    # Build the name we are going to rename to
                     # V0.16 supports multi-episode recordings so if we have one, we put both episode numbers into the episode field
                     if ($multi_episode)
                     {
                         $episode_string = $($this_episode.ToString("0#")) + "-" + $($second_episode.ToString("0#"))
 
-    	               	$episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $second_episode }
+                        $episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $second_episode }
                         $episode_name += "; " + $($episode_data.EpisodeName)
                     }
                     else
@@ -2243,13 +2236,13 @@ function ProcessFile($filename)
                     
                     # v0.12 - define $new_wild to allow us to perform a wildcard Test-Path call to see if the file exists in any format. Note that we do NOT
                     #         put .* at the end of the name as this allows us to check for explicit extensions later on if required
-	           	    $new_name = "$epnameformat.wtv" -f $($episodes.Data.Series.SeriesName), $($this_season.ToString("0#")), $episode_string, $episode_name
+                    $new_name = "$epnameformat.wtv" -f $($episodes.Data.Series.SeriesName), $($this_season.ToString("0#")), $episode_string, $episode_name
                     $new_wild = "$epnameformat" -f $($episodes.Data.Series.SeriesName), $($this_season.ToString("0#")), $episode_string, $episode_name
-	               	# Now perform any required character remapping
-	               	Write-VerboseAndLog "... got interim name of $new_name"
-	               	$new_name = RemapFilename $new_name
+                    # Now perform any required character remapping
+                    Write-VerboseAndLog "... got interim name of $new_name"
+                    $new_name = RemapFilename $new_name
                     $new_wild = RemapFilename $new_wild
-                 	Write-VerboseAndLog "... remapped name is $new_name"
+                    Write-VerboseAndLog "... remapped name is $new_name"
                 }
                 else
                 {
@@ -2258,24 +2251,24 @@ function ProcessFile($filename)
                     $new_wild = $($file.Name)
                     Write-HostAndLog "... moving unmatched episode"
                 }
-	            
-	          	# Rename or move?
-	          	if ($move_to -ne $null)
-	           	{
-	               	# Move - but are we moving to a single folder or to a series structure?
-	       		  	if ($move_to_single_folder -eq $true)
-				  	{
-	                  	if ($move_to -is [Array])
-	                   	{
-	                       	$dest_folder = $move_to[0]
-	                   	}
-	                   	else
-	                   	{
-	                       	$dest_folder = $move_to
-	                   	}
-				  	}
-				  	else
-				  	{
+                
+                # Rename or move?
+                if ($move_to -ne $null)
+                {
+                    # Move - but are we moving to a single folder or to a series structure?
+                    if ($move_to_single_folder -eq $true)
+                    {
+                        if ($move_to -is [Array])
+                        {
+                            $dest_folder = $move_to[0]
+                        }
+                        else
+                        {
+                            $dest_folder = $move_to
+                        }
+                    }
+                    else
+                    {
                         # v0.12 - remap the series name
                         # v0.16 - cope with the situation where we don't have any episode data!
                         if ($episodes -eq $null)
@@ -2286,41 +2279,41 @@ function ProcessFile($filename)
                         {
                             $sn = RemapFilename $($episodes.Data.Series.SeriesName)
                         }
-		      		  	# let's see if we can find a folder with the series name
-	                  	$series_path = $null
-                      	foreach ($path in $move_to)
-	                  	{
-	                     	Write-VerboseAndLog "... checking $path\$sn"
-	                     	if (Test-Path "$path\$sn")
-	                     	{
-	                        	Write-VerboseAndLog "... found series under path $path"
-	                        	$series_path = "$path\$sn"
-	                     	}
-	                  	}
-		                
-	                  	# If we didn't find the series AND the setting to create the series folder is false, we have to drop out.
-                      	# Otherwise, we'll create the folder under the first path and move on.
-                      	if (($series_path -ne $null) -or ($create_series_folder_if_missing -eq $true))
-                      	{
-    	                  	if ($series_path -eq $null)
-	                      	{
-                             	if ($move_to -is [Array])
-                             	{
-	                             	$series_path = "$($move_to[0])\$sn"
-                             	}
-                             	else
-                             	{
-	                             	$series_path = "$($move_to)\$sn"
-                             	}
-	                         	Write-VerboseAndLog "... creating series folder in $series_path"
-	                         	New-Item $series_path -type directory > $null
-	                      	}
-	                
+                        # let's see if we can find a folder with the series name
+                        $series_path = $null
+                        foreach ($path in $move_to)
+                        {
+                            Write-VerboseAndLog "... checking $path\$sn"
+                            if (Test-Path "$path\$sn")
+                            {
+                                Write-VerboseAndLog "... found series under path $path"
+                                $series_path = "$path\$sn"
+                            }
+                        }
+                        
+                        # If we didn't find the series AND the setting to create the series folder is false, we have to drop out.
+                        # Otherwise, we'll create the folder under the first path and move on.
+                        if (($series_path -ne $null) -or ($create_series_folder_if_missing -eq $true))
+                        {
+                            if ($series_path -eq $null)
+                            {
+                                if ($move_to -is [Array])
+                                {
+                                    $series_path = "$($move_to[0])\$sn"
+                                }
+                                else
+                                {
+                                    $series_path = "$($move_to)\$sn"
+                                }
+                                Write-VerboseAndLog "... creating series folder in $series_path"
+                                New-Item $series_path -type directory > $null
+                            }
+                    
                             # Are we moving to season folders? This is optional with V0.16 because we allow unmatched episodes
                             # to be moved as well, which means you can't then support season folders.
                             if ($move_to_season_folders -eq $true)
                             {
-  	    	                  	# Now look for the season folder. With V0.16 this gets a little bit more complicated because
+                                # Now look for the season folder. With V0.16 this gets a little bit more complicated because
                                 # we need to explicitly test for season 0 and use the Specials folder name instead
                                 if ($this_season -eq 0)
                                 {
@@ -2328,40 +2321,40 @@ function ProcessFile($filename)
                                 }
                                 else
                                 {
-                                 	$season_path = "$series_path\$season_folder_name $($this_season.ToString("$season_number_format"))"
+                                    $season_path = "$series_path\$season_folder_name $($this_season.ToString("$season_number_format"))"
                                 }
 
-                              	if (!(Test-Path "$season_path"))
+                                if (!(Test-Path "$season_path"))
                                 {
-	                               	# If we didn't find the season folder, create it
-		                           	Write-VerboseAndLog "... creating season folder in $season_path"
-	                             	New-Item $season_path -type directory > $null
-	                          	}
-						  
-    					    	$dest_folder = $season_path
+                                    # If we didn't find the season folder, create it
+                                    Write-VerboseAndLog "... creating season folder in $season_path"
+                                    New-Item $season_path -type directory > $null
+                                }
+                          
+                                $dest_folder = $season_path
                             }
                             else
                             {
                                 $dest_folder = $series_path
                             }
-                       	}
-	                   	else
-	                   	{
-	                       	# Show that we don't have a destination location
-	                       	$dest_folder = ""
-	                   	}
-	       		  	}
-	                
-                  	if ($dest_folder -eq "")
-                  	{
-                      	Write-HostAndLog "... skipping move as destination location doesn't exist"
-                  	}
-                  	else
-                  	{
-                      	# See if the file already exists there in any format
+                        }
+                        else
+                        {
+                            # Show that we don't have a destination location
+                            $dest_folder = ""
+                        }
+                    }
+                    
+                    if ($dest_folder -eq "")
+                    {
+                        Write-HostAndLog "... skipping move as destination location doesn't exist"
+                    }
+                    else
+                    {
+                        # See if the file already exists there in any format
                         # v0.12 - use $new_wild instead of $new_name
-                     	if (!(Test-Path "$dest_folder\$new_wild.*"))
-                      	{
+                        if (!(Test-Path "$dest_folder\$new_wild.*"))
+                        {
                             if ($convert_to_dvrms)
                             {
                                 # Call WTVConverter to convert the WTV file to DVRMS
@@ -2380,154 +2373,78 @@ function ProcessFile($filename)
                                     }
                                     elseif ($move_wtv_after_conversion)
                                     {
-                                        Write-HostAndLog "... converted to DVR-MS, moving to $move_wtv_after_conversion\$filename"
-	                          	        Move-Item "$recordings\$filename" "$move_wtv_after_conversion\$filename" -ErrorAction "SilentlyContinue"
-	                          	        if ($?)
-	                          	        {
-                                            # If we didn't get an error, write the reverse command out to an undo log file
-									        if ($create_undo_logs)
-                                                { "Move-Item ""$move_wtv_after_conversion\$filename"" ""$recordings\$filename""" >> $undo_log }
-	                          	        }
-	                          	        else
-	                          	        {
-	                              	        Write-HostAndLog "... error during move after conversion: $($error[0])"
-	                          	        }
+                                        MoveFile $recordings $filename $move_wtv_after_conversion $filename "post-DVR-MS conversion"
                                     }
-                                                                                   
-                                    # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs moving
-                                    if (Test-Path "$commercial_metadata_path\$XMLfile")
-                                    {
-                                        Write-HostAndLog "... moving XML file as well"
-                                        Move-Item "$commercial_metadata_path\$XMLfile" "$dest_folder\$new_wild.xml" -ErrorAction "SilentlyContinue"
-                                        if ($?)
-                                        {
-                                            # If we didn't get an error, write the reverse command out to an undo log file
-                                            if ($create_undo_logs)
-                                                { "Move-Item ""$dest_folder\$new_wild.xml"" ""$commercial_metadata_path\$XMLfile""" >> $undo_log }
-                                        }
-                                        else
-                                        {
-                                            Write-HostAndLog "... error during 'DVR-MS conversion' move of XML file: $($error[0])"
-                                        }
-                                    }
+
+                                    MoveFile $commercial_metadata_path ($($file.Name) + ".xml") $dest_folder "$new_wild.xml" "post-DVR-MS conversion"
+                                    MoveFile $commercial_metadata_path ($($file.Name) + ".vprj") $dest_folder "$new_wild.vprj" "post-DVR-MS conversion"
                                 }
                                 else
                                 {
-	                          	    Write-HostAndLog "... error during conversion to DVR-MS: $($error[0])"
+                                    Write-HostAndLog "... error during conversion to DVR-MS: $($error[0])"
                                 }
                             }
                             else
                             {
-                             	Write-HostAndLog "... moving to '$dest_folder\$new_name'"
-	                       	    Move-Item "$recordings\$filename" "$dest_folder\$new_name" -ErrorAction "SilentlyContinue"
-	                       	    if ($?)
-	                       	    {
-	                           	    # If we didn't get an error, write the reverse command out to an undo log file
-	       						    if ($create_undo_logs)
-			     					    { "Move-Item ""$dest_folder\$new_name"" ""$recordings\$filename""" >> $undo_log }
-                                            
-                                    # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs moving
-                                    if (Test-Path "$commercial_metadata_path\$XMLfile")
-                                    {
-                                        Write-HostAndLog "... moving XML file as well"
-                                        Move-Item "$commercial_metadata_path\$XMLfile" "$dest_folder\$new_wild.xml" -ErrorAction "SilentlyContinue"
-                                        if ($?)
-                                        {
-                                            # If we didn't get an error, write the reverse command out to an undo log file
-                                            if ($create_undo_logs)
-                                                { "Move-Item ""$dest_folder\$new_wild.xml"" ""$commercial_metadata_path\$XMLfile""" >> $undo_log }
-                                        }
-                                        else
-                                        {
-                                            Write-HostAndLog "... error during move of XML file to destination folder: $($error[0])"
-                                        }
-                                    }
-	                     	    }
-	                       	    else
-	                       	    {
-	                           	    Write-HostAndLog "... error during move to destination folder: $($error[0])"
-	                       	    }
+                               MoveFile $recordings $filename $dest_folder $new_name ""
+                               MoveFile $commercial_metadata_path ($($file.Name) + ".xml") $dest_folder "$new_wild.xml" ""
+                               MoveFile $commercial_metadata_path ($($file.Name) + ".vprj") $dest_folder "$new_wild.vprj" ""
                             }
-	                  	}
-	                   	else
-	                   	{
+                        }
+                        else
+                        {
                             # The destination file exists already - what do the configuration options tell us to do next?
-	                       	if ($delete_if_dest_exists)
-	                       	{
-	                          	Write-HostAndLog "... file of that name already exists, deleting this one"
-	                           	Remove-Item "$recordings\$filename"
+                            if ($delete_if_dest_exists)
+                            {
+                                Write-HostAndLog "... file of that name already exists, deleting this one"
+                                Remove-Item "$recordings\$filename"
 
                                 # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs deleting
-                                if (Test-Path "$commercial_metadata_path\$XMLfile")
+                                if (Test-Path ("$commercial_metadata_path\"+$file.Name+".xml"))
                                 {
                                     Write-HostAndLog "... deleting XML file as well"
-                                    Remove-Item "$commercial_metadata_path\$XMLfile"
+                                    Remove-Item ("$commercial_metadata_path\"+$file.Name+".xml")
                                 }
-                        	}
+                            }
                             elseif ($rename_if_dest_exists)
                             {
                                 Write-HostAndLog "... file of that name already exists, attempting to rename this one"
-      	                  	    Rename-Item "$recordings\$filename" "$new_name" -ErrorAction "SilentlyContinue"
-	                     	    if ($?)
-	                      	    {
-	                          	    # If we didn't get an error, write the reverse command out to an undo log file
-		      	    			    if ($create_undo_logs)
-				        			    { "Rename-Item ""$recordings\$new_name"" ""$filename""" >> $undo_log }
-    	                 	    }
-	                     	    else
-	                         	{
-	                         	    Write-HostAndLog "... error during rename: $($error[0])"
-	                     	    }
+                                Rename-Item "$recordings\$filename" "$new_name" -ErrorAction "SilentlyContinue"
+                                if ($?)
+                                {
+                                    # If we didn't get an error, write the reverse command out to an undo log file
+                                    if ($create_undo_logs)
+                                        { "Rename-Item ""$recordings\$new_name"" ""$filename""" >> $undo_log }
+                                }
+                                else
+                                {
+                                    Write-HostAndLog "... error during rename: $($error[0])"
+                                }
                             }
-                         	elseif ($move_duplicate_episodes)
+                            elseif ($move_duplicate_episodes)
                             {
                                 Write-HostAndLog "... file of that name already exists, moving to $move_duplicate_episodes\$filename"
-                         	    Move-Item "$recordings\$filename" "$move_duplicate_episodes\$filename" -ErrorAction "SilentlyContinue"
-                         	    if ($?)
-                         	    {
-                             	    # If we didn't get an error, write the reverse command out to an undo log file
-								    if ($create_undo_logs)
-									    { "Move-Item ""$move_duplicate_episodes\$filename"" ""$recordings\$filename""" >> $undo_log }
-                                           
-                                    # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs moving
-                                    if (Test-Path "$commercial_metadata_path\$XMLfile")
-                                    {
-                                        Write-HostAndLog "... moving XML file as well"
-                                        Move-Item "$commercial_metadata_path\$XMLfile" "$move_duplicate_episodes\$XMLfile" -ErrorAction "SilentlyContinue"
-                                        if ($?)
-                                        {
-                                            # If we didn't get an error, write the reverse command out to an undo log file
-                                            if ($create_undo_logs)
-                                                { "Move-Item ""$move_duplicate_episodes\$XMLfile"" ""$commercial_metadata_path\$XMLfile""" >> $undo_log }
-                                        }
-                                        else
-                                        {
-                                            Write-HostAndLog "... error during 'duplicate episodes' move of XML file: $($error[0])"
-                                        }
-                                    }
-	                      	    }
-	                      	    else
-	                      	    {
-	                          	    Write-HostAndLog "... error during 'duplicate episodes' move: $($error[0])"
-                          	    }
+                                MoveFile $recordings $filename $move_duplicate_episodes $filename "duplicate episodes"
+                                MoveFile $commercial_metadata_path ($($file.Name) + ".xml") $move_duplicate_episodes "$new_wild.xml" "duplicate episodes"
+                                MoveFile $commercial_metadata_path ($($file.Name) + ".vprj") $move_duplicate_episodes "$new_wild.vprj" "duplicate episodes"
                             }
                             else
-                         	{
-                              	Write-HostAndLog "... skipping move as file of that name already exists"
-                          	}
-                      	}
-                  	}
-              	}
-              	else
-              	{
-                 	# Rename - does a file of this name already exist?
+                            {
+                                Write-HostAndLog "... skipping move as file of that name already exists"
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    # Rename - does a file of this name already exist?
                     # v0.12 - use $new_wild instead of $new_name to check for any extension
-                 	if (!(Test-Path "$recordings\$new_wild.*"))
-                	{
+                    if (!(Test-Path "$recordings\$new_wild.*"))
+                    {
                         if ($convert_to_dvrms)
                         {
                             # Call WTVConverter to convert the WTV file to DVRMS. Pipe to out-null to force PowerShell to wait
-   	                      	Write-HostAndLog "... converting to '$new_wild.dvr-ms'"
+                            Write-HostAndLog "... converting to '$new_wild.dvr-ms'"
                             .$env:systemroot\ehome\wtvconverter "$recordings\$filename" "$recordings\$new_wild.dvr-ms" /ShowUI | out-null
                             if ($?)
                             {
@@ -2537,205 +2454,160 @@ function ProcessFile($filename)
                                     { "# Converted ""$recordings\$filename"" to ""$recordings\$new_wild.dvr-ms""" >> $undo_log }
                                 if ($delete_wtv_after_conversion)
                                 {
-	                                Write-HostAndLog "... deleting WTV file after converting to DVR-MS"
-	                                Remove-Item "$recordings\$filename"
+                                    Write-HostAndLog "... deleting WTV file after converting to DVR-MS"
+                                    Remove-Item "$recordings\$filename"
                                 }
                                 elseif ($move_wtv_after_conversion)
                                 {
                                     Write-HostAndLog "... converted to DVR-MS, moving to $move_wtv_after_conversion\$filename"
-	                                Move-Item "$recordings\$filename" "$move_wtv_after_conversion\$filename" -ErrorAction "SilentlyContinue"
-	                                if ($?)
-	                                {
-	                       	            # If we didn't get an error, write the reverse command out to an undo log file
-				    	                if ($create_undo_logs)
-						        	        { "Move-Item ""$move_wtv_after_conversion\$filename"" ""$recordings\$filename""" >> $undo_log }
-	                                }
-	                                else
-	                                {
-	                       	            Write-HostAndLog "... error during move after conversion: $($error[0])"
-	                                }
+                                    MoveFile $recordings $filename $move_wtv_after_conversion $filename ""
                                 }
                                                                                                                        
                                 # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs moving
-                                if (Test-Path "$commercial_metadata_path\$XMLfile")
+                                if (Test-Path ("$commercial_metadata_path\"+$($file.Name)+".xml"))
                                 {
                                     Write-HostAndLog "... moving XML file as well"
-                                    Rename-Item "$commercial_metadata_path\$XMLfile" "$new_wild.xml" -ErrorAction "SilentlyContinue"
+                                    Rename-Item ("$commercial_metadata_path\"+$($file.Name)+".xml") "$new_wild.xml" -ErrorAction "SilentlyContinue"
                                     if ($?)
                                     {
                                         # If we didn't get an error, write the reverse command out to an undo log file
                                         if ($create_undo_logs)
-                                            { "Rename-Item ""$commercial_metadata_path\$new_wild.xml"" ""$XMLfile""" >> $undo_log }
+                                            { "Rename-Item """ + $commercial_metadata_path + "\" + $new_wild + ".xml"" """ + ("$commercial_metadata_path\"+$($file.Name)+".xml") + """" >> $undo_log }
                                     }
                                     else
                                     {
                                         Write-HostAndLog "... error during 'DVR-MS conversion' move of XML file: $($error[0])"
                                     }
                                 }
-                            }
-                            else
-                            {
-	                            Write-HostAndLog "... error during conversion to DVR-MS: $($error[0])"
-                            }
-                        }
-                        else
-                        {
-	                 	    Write-HostAndLog "... renaming to '$new_name'"
-	                  	    Rename-Item "$recordings\$filename" "$new_name" -ErrorAction "SilentlyContinue"
-	                  	    if ($?)
-	                   	    {
-	                       	    # If we didn't get an error, write the reverse command out to an undo log file
-		      				    if ($create_undo_logs)
-				    			    { "Rename-Item ""$recordings\$new_name"" ""$filename""" >> $undo_log }
-                                        
-                                # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs renaming
-                                if (Test-Path "$commercial_metadata_path\$XMLfile")
+                                if (Test-Path ("$commercial_metadata_path\"+$($file.Name)+".vprj"))
                                 {
-                                    Write-HostAndLog "... renaming XML file as well"
-                                    Rename-Item "$commercial_metadata_path\$XMLfile" "$new_wild.xml" -ErrorAction "SilentlyContinue"
+                                    Write-HostAndLog "... moving VPRJ file as well"
+                                    Rename-Item ("$commercial_metadata_path\"+$($file.Name)+".vprj") "$new_wild.vprj" -ErrorAction "SilentlyContinue"
                                     if ($?)
                                     {
                                         # If we didn't get an error, write the reverse command out to an undo log file
                                         if ($create_undo_logs)
-                                            { "Rename-Item ""$commercial_metadata_path\$new_wild.xml"" ""$XMLfile""" >> $undo_log }
+                                            { "Rename-Item """ + $commercial_metadata_path + "\" + $new_wild + ".vprj"" """ + ("$commercial_metadata_path\"+$($file.Name)+".vprj") + """" >> $undo_log }
+                                    }
+                                    else
+                                    {
+                                        Write-HostAndLog "... error during 'DVR-MS conversion' move of VPRJ file: $($error[0])"
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                Write-HostAndLog "... error during conversion to DVR-MS: $($error[0])"
+                            }
+                        }
+                        else
+                        {
+                            Write-HostAndLog "... renaming to '$new_name'"
+                            Rename-Item "$recordings\$filename" "$new_name" -ErrorAction "SilentlyContinue"
+                            if ($?)
+                            {
+                                # If we didn't get an error, write the reverse command out to an undo log file
+                                if ($create_undo_logs)
+                                    { "Rename-Item ""$recordings\$new_name"" ""$filename""" >> $undo_log }
+                                        
+                                # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs renaming
+                                if (Test-Path ("$commercial_metadata_path\"+$file.Name+".xml"))
+                                {
+                                    Write-HostAndLog "... renaming XML file as well"
+                                    Rename-Item ("$commercial_metadata_path\"+$file.Name+".xml") "$new_wild.xml" -ErrorAction "SilentlyContinue"
+                                    if ($?)
+                                    {
+                                        # If we didn't get an error, write the reverse command out to an undo log file
+                                        if ($create_undo_logs)
+                                            { "Rename-Item ""$commercial_metadata_path\$new_wild.xml"" """+("$commercial_metadata_path\"+$file.Name+".xml")+"""" >> $undo_log }
                                     }
                                     else
                                     {
                                         Write-HostAndLog "... error during rename of XML file: $($error[0])"
                                     }
                                 }
-	                 	    }
-	                  	    else
-	                      	{
-	                      	    Write-HostAndLog "... error during rename: $($error[0])"
-	                  	    }
+                            }
+                            else
+                            {
+                                Write-HostAndLog "... error during rename: $($error[0])"
+                            }
                         }
-                	}
-                 	else
-                 	{
+                    }
+                    else
+                    {
                         # The destination file exists already - what do the configuration options tell us to do next?
-                    	if ($delete_if_dest_exists)
-                     	{
-                         	Write-HostAndLog "... file of that name already exists, deleting this one"
-                         	Remove-Item "$recordings\$filename"
+                        if ($delete_if_dest_exists)
+                        {
+                            Write-HostAndLog "... file of that name already exists, deleting this one"
+                            Remove-Item "$recordings\$filename"
                                 
                             # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs deleting
-                            if (Test-Path "$commercial_metadata_path\$XMLfile")
+                            if (Test-Path ("$commercial_metadata_path\"+$file.Name+".xml"))
                             {
                                 Write-HostAndLog "... deleting XML file as well"
-                                Remove-Item "$commercial_metadata_path\$XMLfile"
+                                Remove-Item ("$commercial_metadata_path\"+$file.Name+".xml")
                             }
-                    	}
+                        }
                         elseif ($move_duplicate_episodes)
                         {
                             Write-HostAndLog "... file of that name already exists, moving to $move_duplicate_episodes\$filename"
-                            Move-Item "$recordings\$filename" "$move_duplicate_episodes\$filename" -ErrorAction "SilentlyContinue"
-	                        if ($?)
-	                        {
-	                            # If we didn't get an error, write the reverse command out to an undo log file
-	       						if ($create_undo_logs)
-			     				    { "Move-Item ""$move_duplicate_episodes\$filename"" ""$recordings\$filename""" >> $undo_log }
-                                        
-                                # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs moving
-                                if (Test-Path "$commercial_metadata_path\$XMLfile")
-                                {
-                                    Write-HostAndLog "... moving XML file as well"
-                                    Move-Item "$commercial_metadata_path\$XMLfile" "$move_duplicate_episodes\$XMLfile" -ErrorAction "SilentlyContinue"
-                                    if ($?)
-                                    {
-                                        # If we didn't get an error, write the reverse command out to an undo log file
-                                        if ($create_undo_logs)
-                                            { "Move-Item ""$move_duplicate_episodes\$XMLfile"" ""$commercial_metadata_path\$XMLfile""" >> $undo_log }
-                                    }
-                                    else
-                                    {
-                                        Write-HostAndLog "... error during 'duplicate episodes' move of XML file: $($error[0])"
-                                    }
-                                }
-	                      	}
-	                       	else
-	                       	{
-	                            Write-HostAndLog "... error during 'duplicate episodes' move: $($error[0])"
-	                      	}
+                            MoveFile $recordings $filename $move_duplicate_episodes $filename "duplicate episodes"
+                            MoveFile $commercial_metadata_path ($($file.Name)+".xml") $move_duplicate_episodes ($($file.Name)+".xml") "duplicate episodes"
+                            MoveFile $commercial_metadata_path ($($file.Name)+".vprj") $move_duplicate_episodes ($($file.Name)+".vprj") "duplicate episodes"
                         }
-	                  	else
-	                  	{
-	                       	Write-HostAndLog "... skipping rename as file of that name already exists"
-	                   	}
-	               	}
-	           	}
-	       	}
-	       	else
-	       	{
-	           	Write-HostAndLog "... failed to match TV programme precisely against the database"
-	           	# $this_episode can be -1 if we earlier matched against the episode
-	           	# database multiple times, or it can be 0 if we didn't match properly at all
-	           	# and we've only got Best Matches to work against.
-	           	#
-	           	# So only list Best Matches, and ignore any entries where the episode number is zero
-	           	# as that is a revoked entry in TvDB.
-	           	if ($this_episode -eq 0)
-	           	{
-	                $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
-	                foreach ($episode in $episodes.Data.Episode)
-	                {
+                        else
+                        {
+                            Write-HostAndLog "... skipping rename as file of that name already exists"
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Write-HostAndLog "... failed to match TV programme precisely against the database"
+                # $this_episode can be -1 if we earlier matched against the episode
+                # database multiple times, or it can be 0 if we didn't match properly at all
+                # and we've only got Best Matches to work against.
+                #
+                # So only list Best Matches, and ignore any entries where the episode number is zero
+                # as that is a revoked entry in TvDB.
+                if ($this_episode -eq 0)
+                {
+                    $lowest_score = [int]$($episodes.Data.Episode[0].GetAttribute("ID"))
+                    foreach ($episode in $episodes.Data.Episode)
+                    {
                         # 0.08: changed logic so that scores of -1 are ignored
-	                  	if (($lowest_score -le 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0) -and ([int]$($episode.GetAttribute("ID")) -ne -1)))
-	                      	{ $lowest_score = [int]$($episode.GetAttribute("ID")) }
-	                }
-	                Write-VerboseAndLog "... best matches have a score of $lowest_score"
-	                Write-HostAndLog "... possible matching programmes are:"
-	                foreach ($episode in $episodes.Data.Episode)
-	              	{
-	                   	if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
-	                   	{
-	                       	$s = $([int]$episode.SeasonNumber).ToString("0#")
-	                       	$e = $([int]$episode.EpisodeNumber).ToString("0#")
+                        if (($lowest_score -le 0) -or (([int]$($episode.GetAttribute("ID")) -lt $lowest_score) -and ($episode.EpisodeNumber -ne 0) -and ([int]$($episode.GetAttribute("ID")) -ne -1)))
+                            { $lowest_score = [int]$($episode.GetAttribute("ID")) }
+                    }
+                    Write-VerboseAndLog "... best matches have a score of $lowest_score"
+                    Write-HostAndLog "... possible matching programmes are:"
+                    foreach ($episode in $episodes.Data.Episode)
+                    {
+                        if (($($episode.GetAttribute("ID")) -eq $lowest_score) -and ($episode.EpisodeNumber -ne 0))
+                        {
+                            $s = $([int]$episode.SeasonNumber).ToString("0#")
+                            $e = $([int]$episode.EpisodeNumber).ToString("0#")
                             $a = $episode.FirstAired
                             if ($a -ne $null)
                                 { $a = "[Original airdate: $a]" }
 
-	                        Write-HostAndLog "... S$($s)E$($e) - $($episode.EpisodeName) $a"
-	                    }
-	                }
-	            }
-					
-				if ($move_unmatched_episodes -ne $null)
-				{
-					# Move the file to the specified location
-		           	Write-HostAndLog "... moving to '$move_unmatched_episodes\$filename'"
-			        Move-Item "$recordings\$filename" "$move_unmatched_episodes\$filename" -ErrorAction "SilentlyContinue"
-			        if ($?)
-			        {
-			          	# If we didn't get an error, write the reverse command out to an undo log file
-						if ($create_undo_logs)
-							{ "Move-Item ""$move_unmatched_episodes\$filename"" ""$recordings\$filename""" >> $undo_log }
-
-                        # See if there is an XML file in the directory (possibly from Showanalyzer) that also needs moving
-                        if (Test-Path "$commercial_metadata_path\$XMLfile")
-                        {
-                            Write-HostAndLog "... moving XML file as well"
-                            Move-Item "$commercial_metadata_path\$XMLfile" "$move_unmatched_episodes\$XMLfile" -ErrorAction "SilentlyContinue"
-                            if ($?)
-                            {
-                                # If we didn't get an error, write the reverse command out to an undo log file
-                                if ($create_undo_logs)
-                                    { "Move-Item ""$move_unmatched_episodes\$XMLfile"" ""$commercial_metadata_path\$XMLfile""" >> $undo_log }
-                            }
-                            else
-                            {
-                                Write-HostAndLog "... error during 'unmatched episodes' move of XML file: $($error[0])"
-                            }
+                            Write-HostAndLog "... S$($s)E$($e) - $($episode.EpisodeName) $a"
                         }
-		            }
-			        else
-			        {
-			          	Write-HostAndLog "... error during 'umatched episodes' move: $($error[0])"
-					}
-	           	}
-	      	}
-	    }
-	}
+                    }
+                }
+                    
+                if ($move_unmatched_episodes -ne $null)
+                {
+                    # Move the file to the specified location
+                    Write-HostAndLog "... moving to '$move_unmatched_episodes\$filename'"
+                    MoveFile $recordings $filename $move_unmatched_episodes $filename "unmatched episodes"
+                    MoveFile $commercial_metadata_path ($($file.Name)+".xml") $move_unmatched_episodes ($($file.Name)+".xml") "unmatched episodes"
+                    MoveFile $commercial_metadata_path ($($file.Name)+".vprj") $move_unmatched_episodes ($($file.Name)+".vprj") "unmatched episodes"
+                }
+            }
+        }
+    }
 }
 
 ##########################################################################
@@ -2795,7 +2667,7 @@ $commercial_metadata_path = GetCommercialMetadataPath
 
 if (($ignore_series -ne $null) -and ($only_series -ne $null))
 {
-	Throw "Both <ignore_series> and <only_series> have been defined in the XML file. This is not supported."
+    Throw "Both <ignore_series> and <only_series> have been defined in the XML file. This is not supported."
 }
 
 if ($move_episode_if_unmatched -eq $true)
@@ -2832,14 +2704,14 @@ if ($count -gt 1)
 $the_time_is_now = $(Get-Date).ToString("yyyyMMddHHmmss")
 if ($create_undo_logs)
 {
-	# Undo log filename
-	$undo_log = "$log_path\UndoRenames_$($the_time_is_now).ps1"
-	Write-Host "Undo log is called '$undo_log'"
+    # Undo log filename
+    $undo_log = "$log_path\UndoRenames_$($the_time_is_now).ps1"
+    Write-Host "Undo log is called '$undo_log'"
 }
 if ($create_processing_logs)
 {
-	$processing_log = "$log_path\Log_$($the_time_is_now).txt"
-	Write-Host "Processing log is called '$processing_log'"
+    $processing_log = "$log_path\Log_$($the_time_is_now).txt"
+    Write-Host "Processing log is called '$processing_log'"
 }
 
 Write-HostAndLog "WTV-MetaRenamer v$version"
@@ -2904,7 +2776,7 @@ if (($index_title -eq -1) -or ($index_date_created -eq -1) -or ($index_subtitle 
 
 if (($move_to_single_folder -eq $true) -and ($move_to -is [Array]) -and ($move_to.count -ne 1))
 {
-	Write-HostAndLog "WARNING! Move-to-single-folder is defined as true but more than one destination folder specified."
+    Write-HostAndLog "WARNING! Move-to-single-folder is defined as true but more than one destination folder specified."
 }
    
 # Get a randomly selected mirror for TvDB XML files
@@ -2918,7 +2790,7 @@ CheckForUpdatesSinceLastRun
 if ($min_age -ne $null)
 {
     $min_age = (Get-Date).AddDays(-([int]$min_age))
-	Write-VerboseAndLog "... will only process files older than $min_age"
+    Write-VerboseAndLog "... will only process files older than $min_age"
 }
 
 # V0.16: Have we been passed a single file to process?
