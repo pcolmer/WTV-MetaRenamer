@@ -69,6 +69,8 @@
 # 0.18     Bug fix: date matching (work items 2034 & 1781)
 #          Bug fix: execution path improvement (work item 2032)
 #          Feature: extension of moving metadata (work item 1120)
+# 0.19     Bug fix: changed API key for TheTVDB (work item 2439)
+#          Feature: flexible naming for multi-episodes (work item 2220)
 #
 # Original author: Philip Colmer
 
@@ -1272,6 +1274,24 @@ function GetEpisodeNameFormat()
    Write-Output $result
 }
 
+function GetMultiEpisodeFormat()
+{
+   # Define the default result
+   $result = "{0}-{1}"
+   
+   try {
+      # Only override the default value if a value has actually been provided!
+      if ($my_config.config.multi_episode_format -ne "")
+         { $result = $my_config.multi_episode_format }
+   }
+   
+   catch {
+      Write-Verbose "... error while retrieving multi_episode_format element: $($_.Exception.Message)"
+   }
+   
+   Write-Output $result
+}
+
 function GetCreateSeriesFolderIfMissing()
 {
    # Define the default result
@@ -2224,7 +2244,8 @@ function ProcessFile($filename)
                     # V0.16 supports multi-episode recordings so if we have one, we put both episode numbers into the episode field
                     if ($multi_episode)
                     {
-                        $episode_string = $($this_episode.ToString("0#")) + "-" + $($second_episode.ToString("0#"))
+                        # V0.19 supports flexible naming scheme for multi-episode shows
+                        $episode_string = "$multi_episode_format" -f $($this_episode.ToString("0#")), $($second_episode.ToString("0#"))
 
                         $episode_data = $episodes.Data.Episode | Where-Object { $_.SeasonNumber -eq $this_season -and $_.EpisodeNumber -eq $second_episode }
                         $episode_name += "; " + $($episode_data.EpisodeName)
@@ -2639,6 +2660,7 @@ $season_folder_name = GetSeasonFolderName
 $specials_folder_name = GetSpecialsFolderName
 $season_number_format = GetSeasonNumberFormat
 $epnameformat = GetEpisodeNameFormat
+$multi_episode_format = GetMultiEpisodeFormat
 $create_series_folder_if_missing = GetCreateSeriesFolderIfMissing
 $delete_if_dest_exists = GetDeleteIfDestExists
 $rename_if_dest_exists = GetRenameIfDestExists
@@ -2780,7 +2802,7 @@ if (($move_to_single_folder -eq $true) -and ($move_to -is [Array]) -and ($move_t
 }
    
 # Get a randomly selected mirror for TvDB XML files
-$apikey = "DE8C5EB3A19C799A"
+$apikey = "700446549F94A042"
 $tvdb_mirror = AllocateDBMirror
 
 CheckForUpdatesSinceLastRun
