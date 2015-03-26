@@ -71,6 +71,7 @@
 #          Feature: extension of moving metadata (work item 1120)
 # 0.19     Bug fix: changed API key for TheTVDB (work item 2439)
 #          Feature: flexible naming for multi-episodes (work item 2220)
+# 0.20     Made mirror allocation more robust
 #
 # Original author: Philip Colmer
 
@@ -87,7 +88,7 @@ else
   { $WhatIfPreference = $false }
   
 Set-StrictMode –version Latest
-$version = "0.18"
+$version = "0.20"
 $i_am_here = Split-Path -parent $MyInvocation.MyCommand.Definition
 
 function get-ld
@@ -224,8 +225,14 @@ function NodeExists($xmlnode, $to_match)
 
 function AllocateDBMirror
 {
-   $mirrors = FetchXML "http://www.thetvdb.com/api/$apikey/mirrors.xml"
-   # $mirrors = New-Object XML; $mirrors.Load("$data_loc\mirrors.xml")
+   try
+   {
+       $mirrors = FetchXML "http://www.thetvdb.com/api/$apikey/mirrors.xml"
+   }
+   catch
+   {
+       $mirrors = null
+   }
    
    if ($mirrors -ne $null)
    {
@@ -2645,7 +2652,7 @@ try
 }
 catch
 {
-    Throw "Cannot continue if Ionic.Zip.dll cannot be found or loaded"
+    Throw "Cannot continue if Ionic.Zip.dll cannot be found or loaded from $i_am_here"
 }
 
 $my_config = LoadConfigFile
