@@ -72,6 +72,8 @@
 # 0.19     Bug fix: changed API key for TheTVDB (work item 2439)
 #          Feature: flexible naming for multi-episodes (work item 2220)
 # 0.20     Made mirror allocation more robust
+# 0.21     Bug fix: work item 2447 (bug in MoveFile)
+#          Bug fix: work item 2446 (bug in GetMultiEpisodeFormat)
 #
 # Original author: Philip Colmer
 
@@ -88,7 +90,7 @@ else
   { $WhatIfPreference = $false }
   
 Set-StrictMode –version Latest
-$version = "0.20"
+$version = "0.21"
 $i_am_here = Split-Path -parent $MyInvocation.MyCommand.Definition
 
 function get-ld
@@ -1289,7 +1291,7 @@ function GetMultiEpisodeFormat()
    try {
       # Only override the default value if a value has actually been provided!
       if ($my_config.config.multi_episode_format -ne "")
-         { $result = $my_config.multi_episode_format }
+         { $result = $my_config.config.multi_episode_format }
    }
    
    catch {
@@ -1789,7 +1791,7 @@ function MoveFile($fromDir, $fromName, $toDir, $toName, $tag)
     }
     else
     {
-        Write-VerboseAndLog "... skipping move of $directory\$leafname because it doesn't exist"
+        Write-VerboseAndLog "... skipping move of $fromDir\$fromName because it doesn't exist"
     }
 }
 
