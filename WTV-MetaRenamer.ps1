@@ -91,7 +91,7 @@ else
   { $WhatIfPreference = $false }
   
 Set-StrictMode –version Latest
-$version = "0.21"
+$version = "0.22"
 $i_am_here = Split-Path -parent $MyInvocation.MyCommand.Definition
 
 function get-ld
