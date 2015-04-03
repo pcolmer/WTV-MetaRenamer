@@ -74,6 +74,7 @@
 # 0.20     Made mirror allocation more robust
 # 0.21     Bug fix: work item 2447 (bug in MoveFile)
 #          Bug fix: work item 2446 (bug in GetMultiEpisodeFormat)
+# 0.22     Improvement to make it easier to use WTV-MetaRenamer with a drag & drop batch file
 #
 # Original author: Philip Colmer
 
@@ -2828,6 +2829,7 @@ if ($min_age -ne $null)
 if ($singlefile -ne "")
 {
     # Process just that one file
+	$singlefile = Split-Path -leaf $singlefile
     ProcessFile $singlefile
 }
 else
