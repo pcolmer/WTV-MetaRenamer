@@ -1854,8 +1854,8 @@ function ProcessFile($filename)
             {
                 # Move the file to the specified location
                 MoveFileToUnmatched $recordings $filename
-                MoveFileToUnmatched $commercial_metadata_path $($file.Name) + ".xml"
-                MoveFileToUnmatched $commercial_metadata_path $($file.Name) + ".vprj"
+                MoveFileToUnmatched $commercial_metadata_path ($($file.Name) + ".xml")
+                MoveFileToUnmatched $commercial_metadata_path ($($file.Name) + ".vprj")
             }
         }
         else
@@ -1869,8 +1869,8 @@ function ProcessFile($filename)
                 if ($move_ignored_series)
                 {
                    MoveFileToIgnored $recordings $filename
-                   MoveFileToIgnored $commercial_metadata_path $($file.Name) + ".xml"
-                   MoveFileToIgnored $commercial_metadata_path $($file.Name) + ".vprj"
+                   MoveFileToIgnored $commercial_metadata_path ($($file.Name) + ".xml")
+                   MoveFileToIgnored $commercial_metadata_path ($($file.Name) + ".vprj")
                 }                
                 # Then reset the series ID to null so that we don't do anything else with this recording
                 $series_ID = $null
