@@ -75,6 +75,7 @@
 # 0.21     Bug fix: work item 2447 (bug in MoveFile)
 #          Bug fix: work item 2446 (bug in GetMultiEpisodeFormat)
 # 0.22     Improvement to make it easier to use WTV-MetaRenamer with a drag & drop batch file
+# 0.23     Bug fix: extensions for metadata files weren't being handled properly
 #
 # Original author: Philip Colmer
 
@@ -91,7 +92,7 @@ else
   { $WhatIfPreference = $false }
   
 Set-StrictMode –version Latest
-$version = "0.22"
+$version = "0.23"
 $i_am_here = Split-Path -parent $MyInvocation.MyCommand.Definition
 
 function get-ld
