@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+   <default_language></default_language>
+   <xml_cache></xml_cache>
+   <recordings></recordings>
+   <accept_single_bme></accept_single_bme>
+   <move_to></move_to>
+   <move_to_single_folder></move_to_single_folder>
+   <move_to_season_folders></move_to_season_folders>
+   <season_folder_name></season_folder_name>
+   <specials_folder_name></specials_folder_name>
+   <season_number_format></season_number_format>
+   <episode_name_format></episode_name_format>
+   <multi_episode_format></multi_episode_format>
+   <create_series_folder_if_missing></create_series_folder_if_missing>
+   <delete_if_dest_exists></delete_if_dest_exists>
+   <rename_if_dest_exists></rename_if_dest_exists>
+   <move_episode_if_unmatched></move_episode_if_unmatched>
+   <skip_if_protected></skip_if_protected>
+   <min_age></min_age>
+   <change_char from="&amp;" to="and" />
+   <change_char from="?" to="" />
+   <change_char from="/\" to="-" />
+   <change_char from=":" to="," />
+   <ignore_series></ignore_series>
+   <only_series></only_series>
+   <create_undo_logs></create_undo_logs>
+   <create_processing_logs></create_processing_logs>
+   <log_path></log_path>
+   <move_unmatched_series></move_unmatched_series>
+   <move_unmatched_episodes></move_unmatched_episodes>
+   <move_duplicate_episodes></move_duplicate_episodes>
+   <move_ignored_series></move_ignored_series>
+   <attribute_title></attribute_title>
+   <attribute_date_created></attribute_date_created>
+   <attribute_subtitle></attribute_subtitle>
+   <attribute_program_description></attribute_program_description>
+   <attribute_recording_time></attribute_recording_time>
+   <attribute_broadcast_date></attribute_broadcast_date>
+   <attribute_protected></attribute_protected>
+   <convert_to_dvrms></convert_to_dvrms>
+   <delete_wtv_after_conversion></delete_wtv_after_conversion>
+   <move_wtv_after_conversion></move_wtv_after_conversion>
+   <commercial_metadata_path></commercial_metadata_path>
+</config>
